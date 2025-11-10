@@ -1,0 +1,80 @@
+# ==============================================================================
+# Plane Celery Worker Service - Docker Compose
+# ==============================================================================
+# Deploy this as a separate Dokploy application
+# Handles background tasks: emails, webhooks, notifications, imports/exports
+#
+# Prerequisites:
+# 1. Deploy docker-compose.infra.yml first
+# 2. Deploy docker-compose.api.yml before worker
+# 3. Ensure plane-network exists
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Celery Worker (Background Tasks)
+  # ============================================================================
+  worker:
+    container_name: plane-worker
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.api
+      args:
+        DOCKER_BUILDKIT: 1
+    restart: always
+    command: ./bin/docker-entrypoint-worker.sh
+    environment:
+      # Django Configuration
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-0}
+      DJANGO_SETTINGS_MODULE: plane.settings.production
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@plane-postgres:5432/${POSTGRES_DB}
+      PGHOST: plane-postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+
+      # Redis
+      REDIS_URL: redis://plane-redis:6379/
+      REDIS_HOST: plane-redis
+      REDIS_PORT: 6379
+
+      # RabbitMQ
+      RABBITMQ_HOST: plane-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-plane}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@plane-rabbitmq:5672/${RABBITMQ_VHOST:-plane}
+
+      # URLs
+      WEB_URL: ${WEB_URL}
+      API_BASE_URL: ${API_BASE_URL}
+
+      # Storage
+      USE_MINIO: ${USE_MINIO:-1}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://plane-minio:9000}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
+
+      # Python
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+
+    networks:
+      - plane-network
+
+# ==============================================================================
+# Network Configuration
+# ==============================================================================
+networks:
+  plane-network:
+    external: true
+    name: plane-network

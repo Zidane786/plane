@@ -1,0 +1,68 @@
+# ==============================================================================
+# Plane Celery Beat Scheduler Service - Docker Compose
+# ==============================================================================
+# Deploy this as a separate Dokploy application
+# Handles scheduled tasks: cleanup, recurring notifications, cron jobs
+#
+# Prerequisites:
+# 1. Deploy docker-compose.infra.yml first
+# 2. Deploy docker-compose.api.yml before beat-worker
+# 3. Ensure plane-network exists
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Celery Beat Scheduler (Scheduled Tasks)
+  # ============================================================================
+  beat-worker:
+    container_name: plane-beat-worker
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.api
+      args:
+        DOCKER_BUILDKIT: 1
+    restart: always
+    command: ./bin/docker-entrypoint-beat.sh
+    environment:
+      # Django Configuration
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-0}
+      DJANGO_SETTINGS_MODULE: plane.settings.production
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@plane-postgres:5432/${POSTGRES_DB}
+      PGHOST: plane-postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+
+      # Redis
+      REDIS_URL: redis://plane-redis:6379/
+      REDIS_HOST: plane-redis
+      REDIS_PORT: 6379
+
+      # RabbitMQ
+      RABBITMQ_HOST: plane-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-plane}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@plane-rabbitmq:5672/${RABBITMQ_VHOST:-plane}
+
+      # Python
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+
+    networks:
+      - plane-network
+
+# ==============================================================================
+# Network Configuration
+# ==============================================================================
+networks:
+  plane-network:
+    external: true
+    name: plane-network
