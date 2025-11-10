@@ -1,0 +1,32 @@
+# Nixpacks configuration for Plane API (Django Backend)
+# Deploy this as a separate app in Dokploy for api.yourdomain.com
+
+[phases.setup]
+nixPkgs = ["python312", "postgresql", "gcc", "g++"]
+
+[phases.install]
+cmds = [
+  "cd apps/api",
+  "pip install --upgrade pip",
+  "pip install -r requirements.txt --no-cache-dir"
+]
+
+[phases.build]
+cmds = [
+  "cd apps/api",
+  "python manage.py collectstatic --noinput --settings=plane.settings.production"
+]
+
+[start]
+cmd = "cd apps/api && chmod +x bin/docker-entrypoint-api.sh && ./bin/docker-entrypoint-api.sh"
+
+[variables]
+# Python environment
+PYTHONUNBUFFERED = "1"
+PYTHONDONTWRITEBYTECODE = "1"
+
+# Django settings
+DJANGO_SETTINGS_MODULE = "plane.settings.production"
+
+# Port
+PORT = "8000"

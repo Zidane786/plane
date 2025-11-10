@@ -1,0 +1,175 @@
+# ==============================================================================
+# Plane Infrastructure Services - Docker Compose
+# ==============================================================================
+# This compose file contains all infrastructure services needed for Plane:
+# - PostgreSQL (Database)
+# - Redis (Cache & Queue)
+# - RabbitMQ (Message Broker)
+# - MinIO (S3-compatible Object Storage with Web Console)
+#
+# Deploy this on your Dokploy VPS to provide backend services
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # PostgreSQL Database
+  # ============================================================================
+  postgres:
+    image: postgres:15.7-alpine
+    container_name: plane-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-plane}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-plane-db-password-change-this}
+      POSTGRES_DB: ${POSTGRES_DB:-plane}
+      PGDATA: ${PGDATA:-/var/lib/postgresql/data}
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-1000}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - plane-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-plane} -d ${POSTGRES_DB:-plane}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # Redis (Valkey)
+  # ============================================================================
+  redis:
+    image: valkey/valkey:7.2.7-alpine
+    container_name: plane-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - plane-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================================================
+  # RabbitMQ Message Broker
+  # ============================================================================
+  rabbitmq:
+    image: rabbitmq:3.13.6-management-alpine
+    container_name: plane-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-plane}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-rabbitmq-password-change-this}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-plane}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    ports:
+      - "5672:5672"      # AMQP port
+      - "15672:15672"    # Management UI port
+    networks:
+      - plane-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    labels:
+      # Dokploy/Traefik labels for RabbitMQ Management UI
+      - "traefik.enable=true"
+      - "traefik.http.routers.rabbitmq.rule=Host(`rabbitmq.mohdop.com`)"
+      - "traefik.http.routers.rabbitmq.entrypoints=websecure"
+      - "traefik.http.routers.rabbitmq.tls=true"
+      - "traefik.http.routers.rabbitmq.tls.certresolver=letsencrypt"
+      - "traefik.http.services.rabbitmq.loadbalancer.server.port=15672"
+
+  # ============================================================================
+  # MinIO S3-Compatible Object Storage + Web Console
+  # ============================================================================
+  minio:
+    image: minio/minio:latest
+    container_name: plane-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin-password-change-this}
+      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"    # MinIO API port
+      - "9001:9001"    # MinIO Console (Web UI) port
+    networks:
+      - plane-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      # Dokploy/Traefik labels for MinIO Console (Web UI)
+      - "traefik.enable=true"
+
+      # MinIO Console UI
+      - "traefik.http.routers.minio-console.rule=Host(`minio.mohdop.com`)"
+      - "traefik.http.routers.minio-console.entrypoints=websecure"
+      - "traefik.http.routers.minio-console.tls=true"
+      - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.minio-console.service=minio-console"
+      - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
+
+      # MinIO API (optional, for direct S3 API access via domain)
+      - "traefik.http.routers.minio-api.rule=Host(`minio-api.mohdop.com`)"
+      - "traefik.http.routers.minio-api.entrypoints=websecure"
+      - "traefik.http.routers.minio-api.tls=true"
+      - "traefik.http.routers.minio-api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.minio-api.service=minio-api"
+      - "traefik.http.services.minio-api.loadbalancer.server.port=9000"
+
+  # ============================================================================
+  # MinIO Client (mc) - One-time setup to create bucket
+  # ============================================================================
+  minio-setup:
+    image: minio/mc:latest
+    container_name: plane-minio-setup
+    depends_on:
+      - minio
+    networks:
+      - plane-network
+    entrypoint: >
+      /bin/sh -c "
+      sleep 10;
+      mc alias set minio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin-password-change-this};
+      mc mb minio/${MINIO_BUCKET_NAME:-uploads} --ignore-existing;
+      mc anonymous set download minio/${MINIO_BUCKET_NAME:-uploads};
+      echo 'MinIO bucket ${MINIO_BUCKET_NAME:-uploads} created successfully';
+      exit 0;
+      "
+
+# ==============================================================================
+# Volumes for persistent data
+# ==============================================================================
+volumes:
+  postgres_data:
+    name: plane-postgres-data
+  redis_data:
+    name: plane-redis-data
+  rabbitmq_data:
+    name: plane-rabbitmq-data
+  minio_data:
+    name: plane-minio-data
+
+# ==============================================================================
+# Network
+# ==============================================================================
+networks:
+  plane-network:
+    name: plane-network
+    driver: bridge
