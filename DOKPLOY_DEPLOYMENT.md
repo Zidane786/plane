@@ -1,24 +1,18 @@
 # Plane Deployment Guide for Dokploy
 
-Complete guide for deploying Plane project management tool on your VPS using Dokploy with custom domains and HTTPS.
+Complete guide for deploying Plane project management tool on your VPS using Dokploy with Docker Compose.
 
 ## 📋 Table of Contents
 
 - [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
 - [Connecting GitHub to Dokploy](#connecting-github-to-dokploy)
-- [Network Configuration](#network-configuration-critical) ⚠️ **CRITICAL**
+- [Network Configuration](#network-configuration---automatic)
 - [Quick Start](#quick-start)
 - [Step-by-Step Deployment](#step-by-step-deployment)
-  - [1. Deploy Infrastructure Services](#1-deploy-infrastructure-services)
-  - [2. Deploy API Backend](#2-deploy-api-backend)
-  - [3. Deploy Celery Workers](#3-deploy-celery-workers)
-  - [4. Deploy Frontend](#4-deploy-frontend)
-  - [5. Deploy Live Server](#5-deploy-live-server)
-  - [6. Configure Domains & HTTPS](#6-configure-domains--https)
+- [Environment Variables](#environment-variables-reference)
+- [Domain Configuration](#domain-configuration)
 - [Migration to External Services](#migration-to-external-services)
-- [Backup & Restore](#backup--restore)
-- [Monitoring & Health Checks](#monitoring--health-checks)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -27,23 +21,21 @@ Complete guide for deploying Plane project management tool on your VPS using Dok
 
 ### Domain Structure
 
-Your Plane deployment will use the following domain structure:
-
-- **plane.mohdop.com** - Main application (frontend)
-  - `/` - Web app (main interface)
+- **plane.mohdop.com** - Frontend application
+  - `/` - Main web interface
   - `/god-mode` - Admin panel
   - `/spaces` - Public project views
-  - `/live` - Real-time collaboration WebSocket server
-- **plane-api.mohdop.com** - Backend API
-- **minio.mohdop.com** - MinIO console (file storage UI)
+  - `/live` - Real-time collaboration (WebSocket)
+- **plane-api.mohdop.com** - Backend REST API
+- **minio.mohdop.com** - MinIO console (file storage management)
 - **rabbitmq.mohdop.com** - RabbitMQ management (optional)
 
-### Application Components
+### Service Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    Dokploy/Traefik                      │
-│                  (Reverse Proxy + SSL)                  │
+│            (Reverse Proxy + Auto HTTPS/SSL)             │
 └─────────────────────────────────────────────────────────┘
                           │
         ┌─────────────────┼─────────────────┐
@@ -51,8 +43,7 @@ Your Plane deployment will use the following domain structure:
         ▼                 ▼                 ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │   Frontend   │  │  API Backend │  │ Live Server  │
-│ (React/Vite) │  │   (Django)   │  │  (Node.js)   │
-│  Port 3000   │  │  Port 8000   │  │  Port 3000   │
+│ (Nixpacks)   │  │   (Django)   │  │  (Node.js)   │
 └──────────────┘  └──────┬───────┘  └──────────────┘
                          │
         ┌────────────────┼────────────────┐
@@ -60,7 +51,7 @@ Your Plane deployment will use the following domain structure:
         ▼                ▼                ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │ Celery Worker│  │ Beat Worker  │  │  PostgreSQL  │
-│ (Background) │  │  (Scheduler) │  │  Port 5432   │
+│ (Background) │  │  (Scheduler) │  │    :5432     │
 └──────────────┘  └──────────────┘  └──────────────┘
         │                │                │
         └────────────────┼────────────────┘
@@ -70,1345 +61,625 @@ Your Plane deployment will use the following domain structure:
         ▼                ▼                ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │    Redis     │  │   RabbitMQ   │  │    MinIO     │
-│  Port 6379   │  │  Port 5672   │  │  Port 9000   │
+│    :6379     │  │    :5672     │  │    :9000     │
 └──────────────┘  └──────────────┘  └──────────────┘
+
+All services connected via "plane-network" - Automatic! ✨
 ```
 
-### 📦 Total Services Required
+### Deployment Components
 
-#### **Dokploy Applications: 5 apps**
+**6 Dokploy Applications:**
 
-1. **plane-api** - Django backend API (nixpacks.api.toml)
-2. **plane-worker** - Celery worker for background tasks (nixpacks.worker.toml)
-3. **plane-beat-worker** - Celery beat for scheduled tasks (nixpacks.beat-worker.toml)
-4. **plane-frontend** - React frontend (web + admin + space) (nixpacks.frontend.toml)
-5. **plane-live** - Live collaboration WebSocket server (nixpacks.live.toml)
+1. **plane-infra** - Infrastructure services (`docker-compose.infra.yml`) ⚠️ **Deploy First!**
+   - PostgreSQL 15.7
+   - Redis (Valkey 7.2)
+   - RabbitMQ 3.13.6
+   - MinIO (S3-compatible storage)
+   - **Creates `plane-network` for service communication**
 
-#### **Infrastructure Services: 4 containers** (via docker-compose.infra.yml)
+2. **plane-api** - Django REST API (`docker-compose.api.yml`)
+   - Gunicorn + Django application
+   - Handles all API requests
+   - Exposes port 8000
 
-1. **PostgreSQL** (plane-postgres) - Database
-2. **Redis** (plane-redis) - Cache & Queue
-3. **RabbitMQ** (plane-rabbitmq) - Message broker
-4. **MinIO** (plane-minio) - S3-compatible object storage
+3. **plane-worker** - Celery worker (`docker-compose.worker.yml`)
+   - Background task processing
+   - Email sending, webhooks, async operations
 
-#### **Total: 9 services**
-- **5 Dokploy apps** (created in Dokploy dashboard)
-- **4 Docker containers** (run via docker-compose on VPS)
+4. **plane-beat-worker** - Celery beat scheduler (`docker-compose.beat-worker.yml`)
+   - Scheduled/periodic tasks
+   - Cleanup, recurring notifications
+
+5. **plane-live** - Live collaboration server (`docker-compose.live.yml`)
+   - WebSocket server (Hocuspocus/Yjs)
+   - Real-time document collaboration
+   - Exposes port 3000
+
+6. **plane-frontend** - React frontend (`nixpacks.frontend.toml`)
+   - Web, Admin, Space apps
+   - Built with Vite + React
+   - Served via Nginx
+
+### Why Docker Compose + Dokploy?
+
+✅ **Automatic Networking** - All services communicate via `plane-network`, no manual setup
+✅ **GitHub Auto-Deploy** - Push to GitHub, Dokploy rebuilds automatically
+✅ **SSL/HTTPS** - Traefik handles Let's Encrypt certificates automatically
+✅ **Easy Scaling** - Adjust worker counts via environment variables
+✅ **Clean Separation** - One compose file per service for clarity
 
 ---
 
 ## ✅ Prerequisites
 
-### On Your VPS
+### Required
 
-1. **Dokploy installed and running**
-   - Follow: https://dokploy.com/docs/get-started/installation
+- **VPS/Server** with:
+  - Ubuntu 20.04+ / Debian 11+ (recommended)
+  - 4GB+ RAM (8GB+ recommended for production)
+  - 2+ CPU cores
+  - 40GB+ storage
+  - Public IP address
 
-2. **Domain DNS configured**
-   - Point the following A records to your VPS IP:
-     - `plane.mohdop.com`
-     - `plane-api.mohdop.com`
-     - `minio.mohdop.com`
-     - `rabbitmq.mohdop.com` (optional)
+- **Dokploy Installed** ([installation guide](https://docs.dokploy.com))
+  - Dokploy manages: Docker, Traefik, Let's Encrypt
+  - Access at `http://your-server-ip:3000`
 
-3. **System Requirements**
-   - Minimum: 4 CPU cores, 8GB RAM, 50GB storage
-   - Recommended: 8 CPU cores, 16GB RAM, 100GB storage
+- **Domain Names** pointed to your server:
+  - `plane.mohdop.com` → Your server IP
+  - `plane-api.mohdop.com` → Your server IP
+  - `minio.mohdop.com` → Your server IP (optional)
+  - `rabbitmq.mohdop.com` → Your server IP (optional)
 
-### On Your Development Machine
+- **GitHub Repository** with Plane codebase
+  - Fork or clone [makeplane/plane](https://github.com/makeplane/plane)
+  - Push your configuration files to your repo
 
-1. **Git** - To clone the repository
-2. **SSH access** to your VPS
-3. **Docker** (optional) - For local testing
+### Optional (for later migration)
+
+- Managed PostgreSQL (AWS RDS, DigitalOcean, etc.)
+- Managed Redis (AWS ElastiCache, Upstash, etc.)
+- S3-compatible storage (AWS S3, DigitalOcean Spaces, etc.)
 
 ---
 
 ## 🔗 Connecting GitHub to Dokploy
 
-Before deploying, you need to connect your GitHub repository to Dokploy. Follow these steps:
+Dokploy needs access to your GitHub repository for auto-deployment.
 
 ### Method 1: GitHub App (Recommended)
 
-This method provides the best integration with automatic webhook setup.
+1. **In Dokploy Dashboard:**
+   - Go to Settings → GitHub
+   - Click "Install GitHub App"
+   - Follow GitHub authorization flow
 
-1. **Navigate to Dokploy Dashboard**
-   - Go to **Settings** → **Git Providers** → **GitHub**
+2. **Select Repository:**
+   - Choose your Plane repository
+   - Grant access to Dokploy
 
-2. **Create GitHub App**
-   - Click **"Create Github App"**
-   - Enter a unique name (e.g., `plane-dokploy-app`)
-   - Click **"Create Github App"** again
-   - You'll be redirected to GitHub
+3. **Verify Connection:**
+   - Return to Dokploy
+   - You should see your repo in the list
 
-3. **Install GitHub App**
-   - An **"Install"** button will appear in Dokploy
-   - Click **"Install"**
-   - Choose repository access:
-     - **All repositories** (easier)
-     - **Select repositories** (more secure - choose your Plane repo)
-   - Click **"Install & Authorize"**
+### Method 2: SSH Deploy Key
 
-4. **Verify Connection**
-   - After redirect, you should see your GitHub account connected
-   - Your repositories will be available when creating applications
+1. **Generate SSH key on your VPS:**
+   ```bash
+   ssh-keygen -t ed25519 -C "dokploy-plane-deploy" -f ~/.ssh/dokploy-plane
+   cat ~/.ssh/dokploy-plane.pub
+   ```
 
-### Method 2: SSH Keys (Alternative)
-
-If you prefer SSH key authentication:
-
-1. **Generate SSH Key in Dokploy**
-   - Go to **Settings** → **Git Providers** → **GitHub**
-   - Click **"Generate RSA SSH Key"**
-   - Copy the **Public Key**
-
-2. **Add to GitHub**
-   - Go to GitHub → **Settings** → **SSH and GPG keys**
-   - Click **"New SSH key"**
+2. **Add to GitHub:**
+   - Go to your repo → Settings → Deploy keys
+   - Click "Add deploy key"
    - Paste the public key
-   - Click **"Add SSH key"**
+   - Check "Allow write access" if you want Dokploy to push
+   - Save
 
-3. **Configure Repository**
-   - When creating apps, use SSH URL format:
-     ```
-     git@github.com:username/plane.git
-     ```
+3. **Add to Dokploy:**
+   - In Dokploy: Settings → SSH Keys
+   - Add the private key content
+   - Link to your repository
 
-### Auto-Deploy Setup
+### Verify Connection
 
-After connecting, auto-deploy is configured automatically:
-
-- **Default**: Deploys on every push to the selected branch
-- **Branch-specific**: Only deploys when changes are pushed to the configured branch
-- **Multiple environments**: Create separate apps in Dokploy for dev/staging/production
-
-**Example:**
-- **plane-api-dev** → branch: `develop`
-- **plane-api-staging** → branch: `staging`
-- **plane-api-prod** → branch: `main`
+After setup, Dokploy should be able to:
+- Clone your repository
+- Pull updates on push events
+- Trigger automatic rebuilds
 
 ---
 
-## 🌐 Network Configuration (CRITICAL!)
+## 🌐 Network Configuration - Automatic! ✨
 
-**⚠️ IMPORTANT:** All services MUST be on the same Docker network to communicate!
+**Good news!** With docker-compose deployment, networking is **100% automatic**. No manual configuration needed!
 
-### How Dokploy Networking Works
+### How It Works
 
-By default, Dokploy creates **separate networks** for each app, which means:
-- ❌ plane-api **cannot** reach plane-postgres
-- ❌ plane-worker **cannot** reach plane-redis
-- ❌ plane-frontend **cannot** reach plane-api
-- ❌ Services are **ISOLATED** and will fail!
+When you deploy `docker-compose.infra.yml`:
+1. ✅ Creates the `plane-network` Docker bridge network
+2. ✅ Connects PostgreSQL, Redis, RabbitMQ, MinIO to it
+3. ✅ Makes the network available as `external: true`
 
-### The Solution: Shared Network
-
-All services must connect to the same Docker network: `plane-network`
+When you deploy other services:
+1. ✅ Automatically connect to the existing `plane-network`
+2. ✅ Can communicate with all infrastructure services
+3. ✅ Can communicate with each other
 
 ```
 ┌─────────────────────────────────────────────────┐
-│         Docker Network: plane-network           │
+│    Docker Network: plane-network (automatic)    │
 ├─────────────────────────────────────────────────┤
 │                                                 │
 │  [plane-api] ←→ [plane-postgres]               │
 │       ↕              ↕                          │
 │  [plane-worker] ←→ [plane-redis]               │
 │       ↕              ↕                          │
-│  [plane-frontend] ←→ [plane-rabbitmq]          │
+│  [plane-live] ←→ [plane-rabbitmq]              │
 │       ↕              ↕                          │
-│  [plane-live] ←→ [plane-minio]                 │
+│  [plane-beat-worker] ←→ [plane-minio]          │
 │                                                 │
+│        All services can talk to each other!     │
 └─────────────────────────────────────────────────┘
 ```
 
-### Setup Steps
+### Service Names (DNS Resolution)
 
-#### 1. Create the Network Manually (Do This First!)
+All services communicate using container names:
 
-**Check if network exists:**
+- **Database:** `plane-postgres:5432`
+- **Cache/Queue:** `plane-redis:6379`
+- **Message Broker:** `plane-rabbitmq:5672`
+- **Object Storage:** `plane-minio:9000`
+- **API Backend:** `plane-api:8000`
+
+Docker automatically resolves these names within `plane-network`. No IP addresses needed!
+
+### Verification (Optional)
 
 ```bash
-# Check existing networks
+# Check the network exists
 docker network ls | grep plane-network
 
-# If it exists, you'll see:
-# xxxxxxxx   plane-network   bridge    local
+# See all connected services
+docker network inspect plane-network --format '{{range .Containers}}{{.Name}} {{end}}'
+# Should output: plane-postgres plane-redis plane-rabbitmq plane-minio plane-api plane-worker plane-beat-worker plane-live
 ```
-
-**Create the network if it doesn't exist:**
-
-```bash
-# Create a bridge network (NOT overlay)
-docker network create plane-network
-
-# Verify it was created
-docker network ls | grep plane-network
-
-# Inspect the network
-docker network inspect plane-network
-```
-
-> **Note:** We create a **bridge** network (not overlay) because it's simpler and works perfectly for single-host deployments.
-
-#### 2. Deploy Infrastructure Services
-
-Now deploy the infrastructure services which will automatically connect to `plane-network`:
-
-```bash
-# On your VPS
-cd /opt/plane
-
-# Make sure plane-network exists first (from step 1)
-docker network ls | grep plane-network
-
-# Deploy infrastructure
-docker-compose -f docker-compose.infra.yml up -d
-
-# Verify all containers are on the network
-docker network inspect plane-network | grep Name
-# Should show: plane-postgres, plane-redis, plane-rabbitmq, plane-minio
-```
-
-#### 3. Connect Dokploy Apps to Network
-
-**For EACH Dokploy app**, you need to connect it to `plane-network`.
-
-Since Dokploy doesn't have a UI option for custom networks yet, use **Docker commands**:
-
-**Method: Docker Network Connect (After Deployment)**
-
-1. **Deploy your app in Dokploy** (without network config)
-2. **Get the container name:**
-   ```bash
-   docker ps | grep plane-api
-   # Output: abcd1234  plane-api  ...
-   ```
-
-3. **Connect to plane-network:**
-   ```bash
-   # Replace <container-name> with actual name from above
-   docker network connect plane-network <container-name>
-
-   # Example:
-   docker network connect plane-network plane-api
-   ```
-
-4. **Verify connection:**
-   ```bash
-   docker network inspect plane-network | grep plane-api
-   # Should show the container in the network
-   ```
-
-5. **Restart the app in Dokploy UI** to ensure it picks up network configuration
-
-**Alternative: Use docker-compose.infra.yml for ALL services**
-
-Instead of using Dokploy apps, deploy everything via docker-compose:
-- Easier network management
-- All services automatically on plane-network
-- See `docker-compose.yml` for reference
-
-#### 3. Verify Connectivity
-
-After connecting all apps to `plane-network`:
-
-```bash
-# Check all containers on the network
-docker network inspect plane-network | grep Name
-
-# Should show all containers:
-# - plane-postgres
-# - plane-redis
-# - plane-rabbitmq
-# - plane-minio
-# - plane-api
-# - plane-worker
-# - plane-beat-worker
-# - plane-frontend
-# - plane-live
-```
-
-#### 4. Test Communication
-
-From inside any container:
-
-```bash
-# From plane-api, test PostgreSQL connection
-docker exec -it plane-api ping plane-postgres
-
-# From plane-worker, test Redis connection
-docker exec -it plane-worker ping plane-redis
-
-# From plane-frontend, test API connection
-docker exec -it plane-frontend curl http://plane-api:8000/api/health/
-```
-
-### Container Name Resolution
-
-Once on the same network, containers can reach each other by name:
-
-| Service Type | Container Name | How Others Reach It |
-|-------------|----------------|---------------------|
-| PostgreSQL | plane-postgres | `postgresql://plane-postgres:5432` |
-| Redis | plane-redis | `redis://plane-redis:6379` |
-| RabbitMQ | plane-rabbitmq | `amqp://plane-rabbitmq:5672` |
-| MinIO | plane-minio | `http://plane-minio:9000` |
-| API | plane-api | `http://plane-api:8000` |
-| Live | plane-live | `http://plane-live:3000` |
-
-**This is why your .env files use these names!**
-
-### Common Network Issues
-
-**Issue:** "Connection refused" or "Host not found"
-- **Cause:** App not connected to `plane-network`
-- **Fix:** Connect app to network using Method 1 or 2 above
-
-**Issue:** "Name or service not known"
-- **Cause:** Wrong container name in environment variables
-- **Fix:** Use exact container names from docker-compose.infra.yml
-
-**Issue:** "Cannot connect to database"
-- **Cause:** Infrastructure services not running or not on same network
-- **Fix:** Ensure `docker-compose.infra.yml` is running and network exists
 
 ---
 
 ## 🚀 Quick Start
 
-### 1. Clone & Prepare
+### 1. Prepare Environment Files
+
+Copy and customize environment variables for each service:
 
 ```bash
-# Clone your Plane repository
+# On your local machine
 cd /path/to/plane
 
-# Copy environment examples
+# Copy all example files
 cp .env.infra.example .env.infra
 cp .env.api.example .env.api
-cp .env.frontend.example .env.frontend
+cp .env.worker.example .env.worker
+cp .env.beat-worker.example .env.beat-worker
 cp .env.live.example .env.live
+cp .env.frontend.example .env.frontend
 
-# Edit and customize environment variables
-nano .env.infra
+# Edit each file with your values
+# Replace passwords, secrets, domains!
+nano .env.infra       # Infrastructure credentials
+nano .env.api         # API configuration
+nano .env.worker      # Worker configuration
+nano .env.beat-worker # Beat worker configuration
+nano .env.live        # Live server configuration
+nano .env.frontend    # Frontend URLs
 ```
 
-### 2. Deploy Infrastructure
+**⚠️ IMPORTANT:** Change all default passwords and secrets!
+
+### 2. Commit Configuration Files
 
 ```bash
-# Copy docker-compose.infra.yml to your VPS
-scp docker-compose.infra.yml user@your-vps:/opt/plane/
-scp .env.infra user@your-vps:/opt/plane/.env
-
-# SSH into VPS and start infrastructure
-ssh user@your-vps
-cd /opt/plane
-docker-compose -f docker-compose.infra.yml up -d
+git add docker-compose.*.yml .env.*.example nixpacks.frontend.toml
+git commit -m "Add Dokploy deployment configuration"
+git push origin main
 ```
 
-### 3. Deploy Apps via Dokploy UI
+### 3. Create Dokploy Applications (in order!)
 
-Follow the detailed steps in [Step-by-Step Deployment](#step-by-step-deployment) section.
+#### App 1: Infrastructure (Deploy First!)
+
+1. Dokploy Dashboard → Create New Application
+2. **Name:** `plane-infra`
+3. **Type:** Compose
+4. **Repository:** Select your GitHub repo
+5. **Branch:** `main`
+6. **Compose Path:** `docker-compose.infra.yml`
+7. **Environment Variables:** Paste contents of `.env.infra`
+8. Click **Deploy**
+
+Wait for infrastructure to be healthy before proceeding!
+
+#### App 2: API Backend
+
+1. Create New Application → **Name:** `plane-api`
+2. **Type:** Compose
+3. **Compose Path:** `docker-compose.api.yml`
+4. **Environment Variables:** Paste contents of `.env.api`
+5. **Domain:** `plane-api.mohdop.com`
+6. Click **Deploy**
+
+#### App 3: Celery Worker
+
+1. Create New Application → **Name:** `plane-worker`
+2. **Type:** Compose
+3. **Compose Path:** `docker-compose.worker.yml`
+4. **Environment Variables:** Paste contents of `.env.worker`
+5. Click **Deploy** (no domain needed)
+
+#### App 4: Beat Worker
+
+1. Create New Application → **Name:** `plane-beat-worker`
+2. **Type:** Compose
+3. **Compose Path:** `docker-compose.beat-worker.yml`
+4. **Environment Variables:** Paste contents of `.env.beat-worker`
+5. Click **Deploy** (no domain needed)
+
+#### App 5: Live Server
+
+1. Create New Application → **Name:** `plane-live`
+2. **Type:** Compose
+3. **Compose Path:** `docker-compose.live.yml`
+4. **Environment Variables:** Paste contents of `.env.live`
+5. **Domain:** `plane.mohdop.com` with path `/live`
+6. Click **Deploy**
+
+#### App 6: Frontend
+
+1. Create New Application → **Name:** `plane-frontend`
+2. **Type:** Nixpacks
+3. **Build Path:** Root directory (`/`)
+4. **Nixpacks Config:** `nixpacks.frontend.toml`
+5. **Environment Variables:** Paste contents of `.env.frontend`
+6. **Domain:** `plane.mohdop.com`
+7. Click **Deploy**
+
+### 4. Verify Deployment
+
+```bash
+# Check all containers are running
+docker ps | grep plane
+
+# Should see:
+# plane-postgres
+# plane-redis
+# plane-rabbitmq
+# plane-minio
+# plane-api
+# plane-worker
+# plane-beat-worker
+# plane-live
+# plane-frontend (or similar Dokploy-generated name)
+
+# Check API health
+curl https://plane-api.mohdop.com/api/health/
+
+# Check frontend
+curl https://plane.mohdop.com/
+```
 
 ---
 
 ## 📖 Step-by-Step Deployment
 
-### 1. Deploy Infrastructure Services
-
-Infrastructure services (PostgreSQL, Redis, RabbitMQ, MinIO) run as Docker containers outside of Dokploy.
-
-#### On Your VPS:
-
-```bash
-# Create directory
-mkdir -p /opt/plane
-cd /opt/plane
-
-# Copy files (from your dev machine)
-# scp docker-compose.infra.yml .env.infra user@vps:/opt/plane/
-
-# Edit .env.infra and customize passwords
-nano .env.infra
-
-# Start infrastructure services
-docker-compose -f docker-compose.infra.yml up -d
-
-# Verify services are running
-docker-compose -f docker-compose.infra.yml ps
-
-# Check logs
-docker-compose -f docker-compose.infra.yml logs -f
-```
-
-#### Configure DNS Labels
-
-The `docker-compose.infra.yml` includes Traefik labels for:
-- MinIO Console: `minio.mohdop.com`
-- RabbitMQ Management: `rabbitmq.mohdop.com`
-
-These will automatically get SSL certificates via Let's Encrypt.
-
-#### Get Container Network Info
-
-```bash
-# Get container names for environment variables
-docker ps --format "{{.Names}}"
-
-# You'll use these names in your app environment variables:
-# - plane-postgres (for DATABASE_URL)
-# - plane-redis (for REDIS_URL)
-# - plane-rabbitmq (for RABBITMQ_HOST)
-# - plane-minio (for AWS_S3_ENDPOINT_URL)
-```
+*[Continue with detailed deployment steps in next section...]*
 
 ---
 
-### 2. Deploy API Backend
+## 🔧 Environment Variables Reference
 
-#### Create New App in Dokploy
-
-1. **Go to Dokploy Dashboard** → Create New Application
-
-2. **General Settings:**
-   - **Name:** `plane-api`
-   - **App Name:** `plane-api`
-
-3. **Source Configuration:**
-   - **Provider:** Select your connected GitHub account
-   - **Repository:** Select your Plane repository
-   - **Branch:** `main` (or your deployment branch)
-
-4. **Build Configuration:**
-   - **Build Type:** Select `Nixpacks`
-   - **Nixpacks Config Path:** Leave empty (will auto-detect `nixpacks.api.toml` at root)
-   - Alternatively, you can specify: `nixpacks.api.toml`
-
-> **Note:** Dokploy will automatically detect and use the `nixpacks.api.toml` file in your repository root. The file contains all build and start commands needed for the API.
-
-5. **Environment Variables:**
-
-Copy all variables from `.env.api.example` and customize:
-
-**Critical Variables:**
+### Infrastructure (.env.infra)
 
 ```bash
-# Django
-SECRET_KEY=<generate-a-secure-random-key>
-DEBUG=0
-ALLOWED_HOSTS=plane-api.mohdop.com,localhost
-
-# Database (Docker containers)
-DATABASE_URL=postgresql://plane:your-password@plane-postgres:5432/plane
-PGHOST=plane-postgres
-PGUSER=plane
-PGPASSWORD=your-password
-PGDATABASE=plane
+# PostgreSQL
+POSTGRES_USER=plane
+POSTGRES_PASSWORD=<strong-password>
+POSTGRES_DB=plane
 
 # Redis
-REDIS_URL=redis://plane-redis:6379/
 REDIS_HOST=plane-redis
 REDIS_PORT=6379
 
 # RabbitMQ
-RABBITMQ_HOST=plane-rabbitmq
-RABBITMQ_PORT=5672
+RABBITMQ_USER=plane
+RABBITMQ_PASSWORD=<strong-password>
 RABBITMQ_VHOST=plane
-RABBITMQ_DEFAULT_USER=plane
-RABBITMQ_DEFAULT_PASS=your-password
-CELERY_BROKER_URL=amqp://plane:your-password@plane-rabbitmq:5672/plane
+
+# MinIO (S3-compatible storage)
+AWS_ACCESS_KEY_ID=minioadmin
+AWS_SECRET_ACCESS_KEY=<strong-password>
+AWS_S3_BUCKET_NAME=uploads
+AWS_REGION=us-east-1
+```
+
+### API (.env.api)
+
+```bash
+# Traefik routing
+API_DOMAIN=plane-api.mohdop.com
+
+# Django
+SECRET_KEY=<50-character-random-string>
+DEBUG=0
+ALLOWED_HOSTS=plane-api.mohdop.com
+
+# Database (matches .env.infra)
+POSTGRES_USER=plane
+POSTGRES_PASSWORD=<same-as-infra>
+POSTGRES_DB=plane
+
+# Redis (matches .env.infra)
+REDIS_HOST=plane-redis
+REDIS_PORT=6379
+
+# RabbitMQ (matches .env.infra)
+RABBITMQ_USER=plane
+RABBITMQ_PASSWORD=<same-as-infra>
+RABBITMQ_VHOST=plane
 
 # URLs
 WEB_URL=https://plane.mohdop.com
 API_BASE_URL=https://plane-api.mohdop.com
-ADMIN_BASE_URL=https://plane.mohdop.com
-ADMIN_BASE_PATH=/god-mode
-SPACE_BASE_URL=https://plane.mohdop.com
-SPACE_BASE_PATH=/spaces
-LIVE_BASE_URL=https://plane.mohdop.com
-LIVE_BASE_PATH=/live
-
-# CORS
 CORS_ALLOWED_ORIGINS=https://plane.mohdop.com
 
-# Storage (MinIO)
+# Storage (matches .env.infra)
 USE_MINIO=1
-AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=your-password
+AWS_SECRET_ACCESS_KEY=<same-as-infra>
 AWS_S3_ENDPOINT_URL=http://plane-minio:9000
 AWS_S3_BUCKET_NAME=uploads
-FILE_SIZE_LIMIT=5242880
-MINIO_ENDPOINT_SSL=0
-
-# Gunicorn
-GUNICORN_WORKERS=2
 ```
 
-5. **Domain Configuration:**
-   - Domain: `plane-api.mohdop.com`
-   - Enable HTTPS (Let's Encrypt)
-   - Port: `8000`
+### Worker & Beat Worker (.env.worker, .env.beat-worker)
 
-6. **Network Configuration (CRITICAL!):**
+Same as API configuration (database, redis, rabbitmq, storage).
 
-   **⚠️ MUST DO:** Connect to `plane-network` so API can reach PostgreSQL/Redis/RabbitMQ
-
-   After deploying the app, connect it to plane-network:
-   ```bash
-   # Get container name
-   docker ps | grep plane-api
-
-   # Connect to network (replace with actual container name)
-   docker network connect plane-network plane-api
-
-   # Restart in Dokploy UI for changes to take effect
-   ```
-
-   **Without this, the API CANNOT connect to the database!**
-
-7. **Deploy:**
-   - Click "Deploy"
-   - Wait for build and deployment
-   - Check logs for any errors
-
-#### Verify API Deployment
+### Live Server (.env.live)
 
 ```bash
-# Check health
-./healthcheck/api.sh https://plane-api.mohdop.com
+# Traefik routing
+FRONTEND_DOMAIN=plane.mohdop.com
 
-# Or with curl
-curl https://plane-api.mohdop.com/api/health/
-```
-
-#### Run Database Migrations
-
-After first deployment, run migrations:
-
-```bash
-# Via Dokploy console or SSH into the API container
-docker exec -it plane-api python apps/api/manage.py migrate
-
-# Create superuser
-docker exec -it plane-api python apps/api/manage.py createsuperuser
-```
-
----
-
-### 3. Deploy Celery Workers
-
-**⚠️ CRITICAL:** Celery workers are essential for background tasks like:
-- Sending email notifications
-- Processing webhooks
-- Running scheduled cleanups
-- Generating reports
-- Handling async operations
-
-You need to deploy **TWO separate apps** in Dokploy:
-1. **Celery Worker** - Handles background tasks
-2. **Beat Worker** - Handles scheduled/periodic tasks
-
----
-
-#### A. Deploy Celery Worker
-
-1. **Create New App in Dokploy**
-   - Name: `plane-worker`
-   - Build Type: `Nixpacks`
-   - Repository: Your Plane Git repository
-   - Branch: `main`
-
-2. **Nixpacks Configuration:**
-   - Config path: `/nixpacks.worker.toml`
-
-3. **Environment Variables:**
-
-Copy all variables from `.env.worker.example`. **IMPORTANT:** Use the **same values** as your API app for:
-- SECRET_KEY
-- Database credentials
-- Redis credentials
-- RabbitMQ credentials
-- Storage credentials
-
-```bash
-# Django
-SECRET_KEY=<same-as-api>
-DEBUG=0
-DJANGO_SETTINGS_MODULE=plane.settings.production
-
-# Database (same as API)
-DATABASE_URL=postgresql://plane:your-password@plane-postgres:5432/plane
-PGHOST=plane-postgres
-PGUSER=plane
-PGPASSWORD=your-password
-PGDATABASE=plane
-
-# Redis (same as API)
-REDIS_URL=redis://plane-redis:6379/
-REDIS_HOST=plane-redis
-REDIS_PORT=6379
-
-# RabbitMQ (same as API)
-RABBITMQ_HOST=plane-rabbitmq
-RABBITMQ_PORT=5672
-RABBITMQ_VHOST=plane
-RABBITMQ_DEFAULT_USER=plane
-RABBITMQ_DEFAULT_PASS=your-password
-CELERY_BROKER_URL=amqp://plane:your-password@plane-rabbitmq:5672/plane
-
-# Storage (same as API)
-USE_MINIO=1
-AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=minioadmin
-AWS_SECRET_ACCESS_KEY=your-password
-AWS_S3_ENDPOINT_URL=http://plane-minio:9000
-AWS_S3_BUCKET_NAME=uploads
-MINIO_ENDPOINT_SSL=0
-
-# URLs (for generating links)
-WEB_URL=https://plane.mohdop.com
-API_BASE_URL=https://plane-api.mohdop.com
-
-# Email (for sending emails from worker)
-EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
-EMAIL_HOST=smtp.gmail.com
-EMAIL_PORT=587
-EMAIL_USE_TLS=1
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
-DEFAULT_FROM_EMAIL=noreply@mohdop.com
-
-# Python
-PYTHONUNBUFFERED=1
-PYTHONDONTWRITEBYTECODE=1
-```
-
-4. **Network Configuration (CRITICAL!):**
-
-   **⚠️ MUST DO:** Connect to `plane-network`
-
-   After deployment:
-   ```bash
-   docker network connect plane-network plane-worker
-   # Restart in Dokploy UI
-   ```
-
-5. **Domain:**
-   - **No domain needed** - Workers don't serve HTTP traffic
-
-6. **Deploy:**
-   - Click "Deploy"
-   - Check logs for successful startup
-
----
-
-#### B. Deploy Beat Worker (Scheduler)
-
-1. **Create New App in Dokploy**
-   - Name: `plane-beat-worker`
-   - Build Type: `Nixpacks`
-   - Repository: Your Plane Git repository
-   - Branch: `main`
-
-2. **Nixpacks Configuration:**
-   - Config path: `/nixpacks.beat-worker.toml`
-
-3. **Environment Variables:**
-   - **Use exactly the same environment variables as the Worker app above**
-   - Copy all variables from `.env.worker.example`
-
-4. **Network Configuration (CRITICAL!):**
-
-   **⚠️ MUST DO:** Connect to `plane-network`
-
-   After deployment:
-   ```bash
-   docker network connect plane-network plane-worker
-   # Restart in Dokploy UI
-   ```
-
-5. **Domain:**
-   - **No domain needed**
-
-6. **Deploy:**
-   - Click "Deploy"
-   - Check logs for "beat: Starting..."
-
----
-
-#### Verify Worker Deployment
-
-```bash
-# Check worker logs in Dokploy UI
-# You should see:
-# - "Connected to amqp://..." (RabbitMQ connection)
-# - "celery@hostname ready" (Worker ready)
-
-# Check beat-worker logs
-# You should see:
-# - "beat: Starting..."
-# - "Scheduler: Sending due task..." (periodic tasks)
-```
-
-**⚠️ IMPORTANT:** Workers must be running BEFORE the API is fully functional. Deploy workers AFTER API but BEFORE using the application.
-
----
-
-### 4. Deploy Frontend
-
-The frontend serves three applications: web (main), admin, and space.
-
-#### Option A: Using Existing Dockerfile
-
-Plane already has Dockerfiles for frontend apps. Use Docker build type in Dokploy:
-
-1. **Create New App in Dokploy**
-   - Name: `plane-frontend`
-   - Build Type: `Docker`
-   - Dockerfile Path: `apps/web/Dockerfile.web`
-
-2. **Build Configuration:**
-
-Since this is a monorepo, you need to build with the entire context:
-
-```dockerfile
-# Dokploy will automatically detect and use apps/web/Dockerfile.web
-# The Dockerfile already handles the monorepo structure
-```
-
-3. **Environment Variables:**
-
-Copy from `.env.frontend.example`:
-
-```bash
-# API Configuration
-NEXT_PUBLIC_API_BASE_URL=https://plane-api.mohdop.com
-VITE_API_BASE_URL=https://plane-api.mohdop.com
-
-# App URLs
-NEXT_PUBLIC_WEB_BASE_URL=https://plane.mohdop.com
-VITE_WEB_BASE_URL=https://plane.mohdop.com
-
-NEXT_PUBLIC_ADMIN_BASE_URL=https://plane.mohdop.com
-VITE_ADMIN_BASE_URL=https://plane.mohdop.com
-NEXT_PUBLIC_ADMIN_BASE_PATH=/god-mode
-VITE_ADMIN_BASE_PATH=/god-mode
-
-NEXT_PUBLIC_SPACE_BASE_URL=https://plane.mohdop.com
-VITE_SPACE_BASE_URL=https://plane.mohdop.com
-NEXT_PUBLIC_SPACE_BASE_PATH=/spaces
-VITE_SPACE_BASE_PATH=/spaces
-
-NEXT_PUBLIC_LIVE_BASE_URL=https://plane.mohdop.com
-VITE_LIVE_BASE_URL=https://plane.mohdop.com
-NEXT_PUBLIC_LIVE_BASE_PATH=/live
-VITE_LIVE_BASE_PATH=/live
-
-# Deployment
-NODE_ENV=production
-PORT=3000
-```
-
-4. **Domain Configuration:**
-   - Domain: `plane.mohdop.com`
-   - Enable HTTPS (Let's Encrypt)
-   - Port: `3000`
-
-5. **Network Configuration (CRITICAL!):**
-
-   **⚠️ MUST DO:** Connect to `plane-network` so frontend can reach API
-
-   After deployment:
-   ```bash
-   docker network connect plane-network plane-frontend
-   # Restart in Dokploy UI
-   ```
-
-6. **Deploy**
-
-#### Option B: Using Nixpacks
-
-If you prefer nixpacks (already configured):
-
-1. Use Build Type: `Nixpacks`
-2. Config: Point to `nixpacks.frontend.toml`
-3. Same environment variables as above
-
-#### Verify Frontend Deployment
-
-```bash
-# Check health
-./healthcheck/frontend.sh https://plane.mohdop.com
-
-# Check different routes
-curl -I https://plane.mohdop.com/
-curl -I https://plane.mohdop.com/god-mode
-curl -I https://plane.mohdop.com/spaces
-```
-
----
-
-### 5. Deploy Live Server
-
-The live server handles real-time collaboration via WebSocket.
-
-#### Create New App in Dokploy
-
-1. **App Settings:**
-   - Name: `plane-live`
-   - Build Type: `Nixpacks`
-   - Config: Point to `nixpacks.live.toml`
-
-2. **Environment Variables:**
-
-Copy from `.env.live.example`:
-
-```bash
 # Server
 PORT=3000
 NODE_ENV=production
 
 # URLs
-API_BASE_URL=https://plane-api.mohdop.com
+API_BASE_URL=http://plane-api:8000  # Internal service name!
 WEB_BASE_URL=https://plane.mohdop.com
 LIVE_BASE_URL=https://plane.mohdop.com
 LIVE_BASE_PATH=/live
 
-# Authentication (must match API secret)
+# Authentication (matches API SECRET_KEY)
 LIVE_SERVER_SECRET_KEY=<same-as-api-secret-key>
 
-# Redis
-REDIS_URL=redis://plane-redis:6379/
+# Redis (matches .env.infra)
 REDIS_HOST=plane-redis
 REDIS_PORT=6379
 
 # CORS
 ALLOWED_ORIGINS=https://plane.mohdop.com
-
-# WebSocket Configuration
-WS_HEARTBEAT_INTERVAL=30000
-WS_HEARTBEAT_TIMEOUT=90000
-MAX_CONNECTIONS_PER_ROOM=100
 ```
 
-3. **Domain Configuration (Path-based Routing):**
-
-Since live server runs on the same domain with `/live` path:
-
-**Method 1: Using Traefik Path Prefix (Recommended)**
-
-Add these labels in Dokploy:
-
-```yaml
-traefik.http.routers.plane-live.rule=Host(`plane.mohdop.com`) && PathPrefix(`/live`)
-traefik.http.routers.plane-live.entrypoints=websecure
-traefik.http.routers.plane-live.tls=true
-traefik.http.routers.plane-live.tls.certresolver=letsencrypt
-traefik.http.services.plane-live.loadbalancer.server.port=3000
-```
-
-**Method 2: Using Separate Port with Manual Proxy**
-
-Alternatively, expose on a different port and configure Traefik manually.
-
-4. **Network Configuration (CRITICAL!):**
-
-   **⚠️ MUST DO:** Connect to `plane-network` so live server can reach Redis/API
-
-   After deployment:
-   ```bash
-   docker network connect plane-network plane-live
-   # Restart in Dokploy UI
-   ```
-
-5. **Deploy**
-
-#### Verify Live Server
+### Frontend (.env.frontend)
 
 ```bash
-# Check health
-./healthcheck/live.sh https://plane.mohdop.com/live
-
-# Test WebSocket connection (if wscat installed)
-wscat -c wss://plane.mohdop.com/live
+# API URLs (public URLs, not internal)
+NEXT_PUBLIC_API_BASE_URL=https://plane-api.mohdop.com
+NEXT_PUBLIC_WEBAPP_URL=https://plane.mohdop.com
+NEXT_PUBLIC_ADMIN_BASE_URL=https://plane.mohdop.com
+NEXT_PUBLIC_ADMIN_BASE_PATH=/god-mode
+NEXT_PUBLIC_SPACE_BASE_URL=https://plane.mohdop.com
+NEXT_PUBLIC_SPACE_BASE_PATH=/spaces
+NEXT_PUBLIC_LIVE_BASE_URL=https://plane.mohdop.com
+NEXT_PUBLIC_LIVE_BASE_PATH=/live
 ```
 
 ---
 
-### 6. Configure Domains & HTTPS
+## 🌍 Domain Configuration
 
-#### DNS Configuration
+Traefik (built into Dokploy) handles all domain routing and SSL automatically.
 
-Ensure all domains point to your VPS IP:
+### Domain → Service Mapping
 
-```bash
-# Check DNS resolution
-dig plane.mohdop.com
-dig plane-api.mohdop.com
-dig minio.mohdop.com
+| Domain | Service | Port | SSL |
+|--------|---------|------|-----|
+| plane.mohdop.com | Frontend | 3000 | ✅ Auto |
+| plane.mohdop.com/live | Live Server | 3000 | ✅ Auto |
+| plane.mohdop.com/god-mode | Frontend (Admin) | 3000 | ✅ Auto |
+| plane.mohdop.com/spaces | Frontend (Space) | 3000 | ✅ Auto |
+| plane-api.mohdop.com | API Backend | 8000 | ✅ Auto |
+| minio.mohdop.com | MinIO Console | 9001 | ✅ Auto |
+| rabbitmq.mohdop.com | RabbitMQ Mgmt | 15672 | ✅ Auto |
+
+### DNS Setup
+
+Point all domains to your server's IP:
+
+```
+A    plane            →  123.45.67.89
+A    plane-api        →  123.45.67.89
+A    minio            →  123.45.67.89
+A    rabbitmq         →  123.45.67.89
 ```
 
-#### HTTPS Certificates
+Or use wildcard:
 
-Dokploy uses Traefik with automatic Let's Encrypt certificates:
-
-1. **In Dokploy:** Enable HTTPS for each app
-2. **Certificate Resolver:** Select `letsencrypt`
-3. **Auto-renewal:** Traefik handles this automatically
-
-#### Verify HTTPS
-
-```bash
-# Check SSL certificates
-curl -vI https://plane.mohdop.com 2>&1 | grep -i "SSL\|TLS"
-curl -vI https://plane-api.mohdop.com 2>&1 | grep -i "SSL\|TLS"
-curl -vI https://minio.mohdop.com 2>&1 | grep -i "SSL\|TLS"
 ```
+A    *.mohdop.com     →  123.45.67.89
+```
+
+Traefik automatically:
+- Detects new domains from Traefik labels
+- Requests Let's Encrypt certificates
+- Handles HTTPS redirection
+- Renews certificates before expiry
 
 ---
 
 ## 🔄 Migration to External Services
 
-### Migrate PostgreSQL to Managed Database
+See backup old `DOKPLOY_DEPLOYMENT.md.backup` for migration scripts and detailed instructions.
 
-When you're ready to move from Docker PostgreSQL to a managed service (AWS RDS, DigitalOcean, etc.):
-
-```bash
-# Run migration script
-./scripts/migrate-postgres-to-external.sh
-
-# Follow the interactive prompts
-# Script will:
-# 1. Export data from Docker container
-# 2. Import to external database
-# 3. Validate migration
-# 4. Generate new environment variables
-```
-
-After migration:
-
-1. Update `.env.api` in Dokploy with new database connection
-2. Restart API app
-3. Verify application works
-4. Stop Docker PostgreSQL container (keep backup!)
-
-### Migrate MinIO to S3/Spaces
-
-To migrate from self-hosted MinIO to AWS S3 or DigitalOcean Spaces:
-
-```bash
-# Run migration script
-./scripts/migrate-storage-to-s3.sh
-
-# Follow the interactive prompts
-# Script will:
-# 1. Sync files from MinIO to S3
-# 2. Validate file transfer
-# 3. Generate new environment variables
-```
-
-After migration:
-
-1. Update `.env.api` in Dokploy:
-   ```bash
-   USE_MINIO=0
-   AWS_REGION=your-region
-   AWS_ACCESS_KEY_ID=your-key
-   AWS_SECRET_ACCESS_KEY=your-secret
-   AWS_S3_BUCKET_NAME=your-bucket
-   # Remove AWS_S3_ENDPOINT_URL for AWS S3
-   # Or set to Spaces endpoint for DigitalOcean
-   ```
-2. Restart API app
-3. Test file uploads
-4. Stop MinIO container (keep backup!)
-
----
-
-## 💾 Backup & Restore
-
-### Automated Backups
-
-Set up automated backups using the included script:
-
-```bash
-# Manual backup
-./scripts/backup-data.sh
-
-# Database only
-./scripts/backup-data.sh --database-only
-
-# Storage only
-./scripts/backup-data.sh --storage-only
-```
-
-### Schedule with Cron
-
-```bash
-# Edit crontab
-crontab -e
-
-# Add daily backup at 2 AM
-0 2 * * * /opt/plane/scripts/backup-data.sh >> /var/log/plane-backup.log 2>&1
-
-# Weekly full backup on Sunday at 3 AM
-0 3 * * 0 /opt/plane/scripts/backup-data.sh >> /var/log/plane-backup-weekly.log 2>&1
-```
-
-### Restore from Backup
-
-```bash
-# See detailed instructions in:
-cat backups/RESTORE.md
-
-# Quick restore database
-gunzip -c backups/database/latest.sql.gz | docker exec -i plane-postgres psql -U plane -d plane
-
-# Quick restore storage
-tar -xzf backups/storage/plane_storage_YYYYMMDD.tar.gz -C /tmp/restore
-docker cp /tmp/restore/. plane-minio:/data/uploads/
-```
-
-### Off-site Backups
-
-Sync backups to remote storage:
-
-```bash
-# To AWS S3
-aws s3 sync ./backups/ s3://your-backup-bucket/plane-backups/
-
-# To DigitalOcean Spaces
-s3cmd sync ./backups/ s3://your-space/plane-backups/
-
-# Using rclone
-rclone sync ./backups/ remote:plane-backups/
-```
-
----
-
-## 📊 Monitoring & Health Checks
-
-### Manual Health Checks
-
-Use provided health check scripts:
-
-```bash
-# Check all services
-./healthcheck/api.sh https://plane-api.mohdop.com
-./healthcheck/frontend.sh https://plane.mohdop.com
-./healthcheck/live.sh https://plane.mohdop.com/live
-```
-
-### Setup Monitoring with Dokploy
-
-Dokploy includes monitoring features:
-
-1. **Metrics:** View CPU, Memory, Network usage per app
-2. **Logs:** Real-time log streaming
-3. **Alerts:** Configure alerts for high resource usage
-
-### External Monitoring
-
-Setup external monitoring services:
-
-- **UptimeRobot:** Monitor uptime and response time
-- **Better Uptime:** Advanced monitoring with status page
-- **Sentry:** Error tracking (configure SENTRY_DSN in environment)
-- **Scout APM:** Performance monitoring (configure SCOUT_KEY)
-
-### Log Aggregation
-
-```bash
-# View logs for each service
-docker logs -f plane-postgres
-docker logs -f plane-redis
-docker logs -f plane-rabbitmq
-docker logs -f plane-minio
-
-# Dokploy app logs available in UI
-```
+Quick summary:
+- Use `scripts/migrate-postgres-to-external.sh` for database migration
+- Use `scripts/migrate-storage-to-s3.sh` for MinIO → S3 migration
+- Update environment variables to point to external services
+- Redeploy apps with new configuration
 
 ---
 
 ## 🔧 Troubleshooting
 
-### API Not Starting
+### Service Can't Connect to Database/Redis
 
-**Check Logs:**
+**Symptom:** Connection refused, host not found
+
+**Solution:**
 ```bash
-# In Dokploy UI, check build and runtime logs
+# Verify infrastructure is running
+docker ps | grep plane-postgres
+docker ps | grep plane-redis
+
+# Check network exists
+docker network ls | grep plane-network
+
+# Restart the failing service in Dokploy UI
 ```
 
-**Common Issues:**
+### API Returns 502 Bad Gateway
 
-1. **Database Connection Failed**
-   ```bash
-   # Verify container is running
-   docker ps | grep plane-postgres
+**Symptom:** Frontend shows 502 error
 
-   # Test connection
-   docker exec plane-postgres psql -U plane -d plane -c "SELECT 1;"
-
-   # Check network
-   docker network inspect plane-network
-   ```
-
-2. **Migration Errors**
-   ```bash
-   # Reset migrations (CAUTION: will lose data)
-   docker exec -it plane-api python apps/api/manage.py migrate --fake-initial
-
-   # Or run migrations manually
-   docker exec -it plane-api python apps/api/manage.py migrate
-   ```
-
-3. **Permission Issues**
-   ```bash
-   # Fix file permissions
-   docker exec -it plane-api chown -R nobody:nobody /app
-   ```
-
-### Frontend Build Failures
-
-**Common Issues:**
-
-1. **Out of Memory During Build**
-   ```bash
-   # Increase Node memory in Dokploy build settings
-   NODE_OPTIONS=--max-old-space-size=4096
-   ```
-
-2. **Dependency Installation Fails**
-   ```bash
-   # Clear pnpm cache
-   rm -rf node_modules
-   rm pnpm-lock.yaml
-   pnpm install
-   ```
-
-3. **Environment Variables Not Applied**
-   ```bash
-   # Rebuild with --no-cache
-   # In Dokploy, trigger a clean rebuild
-   ```
-
-### Live Server WebSocket Issues
-
-**Check WebSocket Connection:**
-
+**Solution:**
 ```bash
-# Test with wscat
-npm install -g wscat
-wscat -c wss://plane.mohdop.com/live
+# Check API logs
+docker logs plane-api --tail=50
 
-# Check Traefik configuration
-docker exec traefik cat /etc/traefik/traefik.yml
+# Check API is healthy
+curl http://plane-api:8000/health/  # From another container
+curl https://plane-api.mohdop.com/health/  # From outside
+
+# Restart API in Dokploy
 ```
 
-**Common Issues:**
+### Live Server WebSocket Connection Failed
 
-1. **WebSocket Upgrade Failed**
-   - Ensure Traefik has WebSocket support enabled
-   - Check CORS configuration
-   - Verify path routing is correct
+**Symptom:** Real-time features not working
 
-2. **Connection Timeout**
-   - Increase timeout in Traefik:
-   ```yaml
-   http:
-     services:
-       plane-live:
-         loadBalancer:
-           passHostHeader: true
-           responseForwarding:
-             flushInterval: 1ms
-   ```
-
-### Storage/MinIO Issues
-
-**Check MinIO Status:**
-
+**Solution:**
 ```bash
-# Check container
-docker ps | grep plane-minio
+# Check live server logs
+docker logs plane-live --tail=50
 
-# Check logs
-docker logs plane-minio
+# Verify Redis connection
+docker exec plane-live redis-cli -h plane-redis ping
 
-# Access MinIO console
-open https://minio.mohdop.com
-
-# Login with credentials from .env.infra
+# Check CORS settings in .env.live
+# ALLOWED_ORIGINS must match frontend domain
 ```
 
-**Common Issues:**
+### Workers Not Processing Tasks
 
-1. **Cannot Upload Files**
-   - Check bucket permissions
-   - Verify AWS credentials in API environment
-   - Check FILE_SIZE_LIMIT setting
+**Symptom:** Emails not sending, webhooks not firing
 
-2. **Files Not Accessible**
-   - Check bucket policy (public read?)
-   - Verify endpoint URLs
-   - Check CORS configuration
-
-### Database Performance Issues
-
-**Check Database Stats:**
-
+**Solution:**
 ```bash
-# Connection count
-docker exec plane-postgres psql -U plane -d plane -c "SELECT count(*) FROM pg_stat_activity;"
+# Check worker logs
+docker logs plane-worker --tail=50
+docker logs plane-beat-worker --tail=50
 
-# Long running queries
-docker exec plane-postgres psql -U plane -d plane -c "SELECT pid, now() - pg_stat_activity.query_start AS duration, query FROM pg_stat_activity WHERE state = 'active' ORDER BY duration DESC;"
+# Verify RabbitMQ connection
+docker exec plane-worker ping plane-rabbitmq
 
-# Database size
-docker exec plane-postgres psql -U plane -d plane -c "SELECT pg_size_pretty(pg_database_size('plane'));"
-```
-
-**Optimize:**
-
-```bash
-# Run VACUUM
-docker exec plane-postgres psql -U plane -d plane -c "VACUUM ANALYZE;"
-
-# Reindex
-docker exec plane-postgres psql -U plane -d plane -c "REINDEX DATABASE plane;"
+# Check RabbitMQ has queues
+# Access https://rabbitmq.mohdop.com (use RABBITMQ_USER/PASSWORD)
 ```
 
 ### SSL Certificate Issues
 
-**Check Certificate:**
+**Symptom:** HTTPS not working, certificate errors
 
-```bash
-# View certificate details
-echo | openssl s_client -servername plane.mohdop.com -connect plane.mohdop.com:443 2>/dev/null | openssl x509 -noout -dates -subject
-
-# Force certificate renewal in Traefik
-docker exec traefik traefik healthcheck
-```
-
-**Common Issues:**
-
-1. **Certificate Not Issued**
-   - Check DNS is propagated
-   - Verify port 80/443 are open
-   - Check Traefik logs
-   - Ensure email is configured in Let's Encrypt
-
-2. **Certificate Expired**
-   - Traefik auto-renews, but check:
-   ```bash
-   docker logs traefik | grep -i "renew\|certificate"
-   ```
-
----
-
-## 🆘 Getting Help
-
-### Check Logs
-
-1. **Dokploy UI:** View real-time logs for each app
-2. **Infrastructure logs:**
-   ```bash
-   docker-compose -f docker-compose.infra.yml logs -f [service]
-   ```
-
-### Useful Commands
-
-```bash
-# Check all containers
-docker ps -a
-
-# Check disk usage
-df -h
-docker system df
-
-# Check Docker networks
-docker network ls
-docker network inspect plane-network
-
-# Check memory usage
-free -h
-
-# Check ports
-netstat -tulpn | grep -E '(3000|5432|6379|5672|9000)'
-```
-
-### Community & Documentation
-
-- **Plane Documentation:** https://docs.plane.so
-- **Dokploy Documentation:** https://dokploy.com/docs
-- **Plane GitHub:** https://github.com/makeplane/plane
-- **Plane Discord:** https://discord.com/invite/plane
+**Solution:**
+- Verify DNS points to your server IP
+- Wait 5-10 minutes for Let's Encrypt
+- Check Traefik logs in Dokploy
+- Ensure no firewall blocking ports 80/443
 
 ---
 
 ## ✅ Post-Deployment Checklist
 
-- [ ] All services are running and healthy
-- [ ] HTTPS certificates are active for all domains
-- [ ] Database migrations completed successfully
-- [ ] Superuser account created
-- [ ] File uploads working correctly
-- [ ] Real-time collaboration functional
-- [ ] Automated backups configured
-- [ ] Monitoring/alerting set up
-- [ ] DNS configured correctly
-- [ ] Firewall rules configured
-- [ ] Environment variables secured
-- [ ] Documentation reviewed by team
+- [ ] All 6 Dokploy apps deployed and running
+- [ ] All containers healthy: `docker ps | grep plane`
+- [ ] Frontend accessible: https://plane.mohdop.com
+- [ ] API health check passes: https://plane-api.mohdop.com/health/
+- [ ] Admin panel accessible: https://plane.mohdop.com/god-mode
+- [ ] Live server responding: https://plane.mohdop.com/live
+- [ ] MinIO console accessible: https://minio.mohdop.com (use AWS_ACCESS_KEY_ID/SECRET)
+- [ ] RabbitMQ console accessible: https://rabbitmq.mohdop.com (use RABBITMQ_USER/PASSWORD)
+- [ ] Test email sending from Plane
+- [ ] Test file upload/download
+- [ ] Test real-time collaboration
+- [ ] Verify GitHub auto-deploy: push a commit and check rebuild
 
 ---
 
-## 🎉 Congratulations!
+## 🎉 Success!
 
-Your Plane instance is now deployed and running on Dokploy with:
+Your Plane instance is now running! 🚀
 
-- ✅ Custom domains with HTTPS
-- ✅ Scalable architecture
-- ✅ Automated backups
-- ✅ Easy migration path to managed services
-- ✅ Production-ready configuration
+Access your application at: **https://plane.mohdop.com**
 
-Access your Plane instance at: **https://plane.mohdop.com**
+### Next Steps
 
----
+1. **Create admin account** via Django shell:
+   ```bash
+   docker exec -it plane-api python manage.py createsuperuser
+   ```
 
-## 📝 Maintenance
+2. **Configure email** (optional, in `.env.api`):
+   ```bash
+   EMAIL_HOST=smtp.gmail.com
+   EMAIL_HOST_USER=your-email@gmail.com
+   EMAIL_HOST_PASSWORD=your-app-password
+   ```
 
-### Regular Tasks
+3. **Set up backups** using `scripts/backup-data.sh`
 
-**Daily:**
-- Check application health
-- Review logs for errors
-- Monitor resource usage
+4. **Monitor logs** via Dokploy UI or:
+   ```bash
+   docker logs -f plane-api
+   docker logs -f plane-worker
+   ```
 
-**Weekly:**
-- Review backup status
-- Check for security updates
-- Monitor disk space
-
-**Monthly:**
-- Update dependencies
-- Review and optimize database
-- Test backup restoration
-- Review access logs
-
-### Updating Plane
-
-```bash
-# Pull latest changes
-git pull origin main
-
-# Rebuild in Dokploy
-# Trigger rebuild for each app in Dokploy UI
-
-# Run migrations if needed
-docker exec -it plane-api python apps/api/manage.py migrate
-```
+5. **Scale workers** (if needed):
+   - Update `GUNICORN_WORKERS` in `.env.api`
+   - Redeploy in Dokploy
 
 ---
 
-**Need help?** Check the troubleshooting section or reach out to the Plane community!
+## 📚 Additional Resources
+
+- [Plane Documentation](https://docs.plane.so)
+- [Dokploy Documentation](https://docs.dokploy.com)
+- [Traefik Documentation](https://doc.traefik.io/traefik/)
+- [GitHub Issues](https://github.com/makeplane/plane/issues)
+
+---
+
+**Need Help?** Check the [Troubleshooting](#troubleshooting) section or create an issue in your repository.

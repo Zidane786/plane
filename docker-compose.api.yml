@@ -1,0 +1,109 @@
+# ==============================================================================
+# Plane API Service - Docker Compose
+# ==============================================================================
+# Deploy this as a separate Dokploy application
+# Connects to plane-network for communication with infrastructure services
+#
+# Prerequisites:
+# 1. Deploy docker-compose.infra.yml first to create plane-network and services
+# 2. Ensure plane-network exists: docker network ls | grep plane-network
+# 3. Configure environment variables in Dokploy
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # API Backend (Django + Gunicorn)
+  # ============================================================================
+  api:
+    container_name: plane-api
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.api
+      args:
+        DOCKER_BUILDKIT: 1
+    restart: always
+    command: ./bin/docker-entrypoint-api.sh
+    environment:
+      # Django Configuration
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-0}
+      DJANGO_SETTINGS_MODULE: plane.settings.production
+
+      # Database (connects to postgres service in plane-network)
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@plane-postgres:5432/${POSTGRES_DB}
+      PGHOST: plane-postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+
+      # Redis (connects to redis service in plane-network)
+      REDIS_URL: redis://plane-redis:6379/
+      REDIS_HOST: plane-redis
+      REDIS_PORT: 6379
+
+      # RabbitMQ (connects to rabbitmq service in plane-network)
+      RABBITMQ_HOST: plane-rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_VHOST: ${RABBITMQ_VHOST:-plane}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@plane-rabbitmq:5672/${RABBITMQ_VHOST:-plane}
+
+      # URLs
+      WEB_URL: ${WEB_URL}
+      API_BASE_URL: ${API_BASE_URL}
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL}
+      ADMIN_BASE_PATH: ${ADMIN_BASE_PATH:-/god-mode}
+      SPACE_BASE_URL: ${SPACE_BASE_URL}
+      SPACE_BASE_PATH: ${SPACE_BASE_PATH:-/spaces}
+      LIVE_BASE_URL: ${LIVE_BASE_URL}
+      LIVE_BASE_PATH: ${LIVE_BASE_PATH:-/live}
+
+      # CORS
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+      # Storage (connects to minio service in plane-network)
+      USE_MINIO: ${USE_MINIO:-1}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_S3_ENDPOINT_URL: ${AWS_S3_ENDPOINT_URL:-http://plane-minio:9000}
+      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-uploads}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-5242880}
+      MINIO_ENDPOINT_SSL: ${MINIO_ENDPOINT_SSL:-0}
+
+      # Gunicorn
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+
+      # Security
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      SESSION_COOKIE_SECURE: 1
+      CSRF_COOKIE_SECURE: 1
+
+      # Python
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+
+    networks:
+      - plane-network
+
+    labels:
+      # Traefik labels for automatic HTTPS and routing
+      - "traefik.enable=true"
+      - "traefik.http.routers.plane-api.rule=Host(`${API_DOMAIN}`)"
+      - "traefik.http.routers.plane-api.entrypoints=websecure"
+      - "traefik.http.routers.plane-api.tls=true"
+      - "traefik.http.routers.plane-api.tls.certresolver=letsencrypt"
+      - "traefik.http.services.plane-api.loadbalancer.server.port=8000"
+
+# ==============================================================================
+# Network Configuration
+# ==============================================================================
+# Connect to external plane-network created by docker-compose.infra.yml
+networks:
+  plane-network:
+    external: true
+    name: plane-network

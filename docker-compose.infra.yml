@@ -65,9 +65,10 @@ services:
     container_name: plane-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-plane}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:-rabbitmq-password-change-this}
-      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_DEFAULT_VHOST:-plane}
+      # Map user-friendly variable names to RabbitMQ's expected names
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-plane}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-rabbitmq-password-change-this}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST:-plane}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     ports:
@@ -97,9 +98,10 @@ services:
     container_name: plane-minio
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin-password-change-this}
-      MINIO_REGION: ${MINIO_REGION:-us-east-1}
+      # Map AWS variable names to MinIO's expected names
+      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this}
+      MINIO_REGION: ${AWS_REGION:-us-east-1}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -146,10 +148,10 @@ services:
     entrypoint: >
       /bin/sh -c "
       sleep 10;
-      mc alias set minio http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin-password-change-this};
-      mc mb minio/${MINIO_BUCKET_NAME:-uploads} --ignore-existing;
-      mc anonymous set download minio/${MINIO_BUCKET_NAME:-uploads};
-      echo 'MinIO bucket ${MINIO_BUCKET_NAME:-uploads} created successfully';
+      mc alias set minio http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this};
+      mc mb minio/${AWS_S3_BUCKET_NAME:-uploads} --ignore-existing;
+      mc anonymous set download minio/${AWS_S3_BUCKET_NAME:-uploads};
+      echo 'MinIO bucket ${AWS_S3_BUCKET_NAME:-uploads} created successfully';
       exit 0;
       "
 
