@@ -171,5 +171,7 @@ volumes:
 # ==============================================================================
 networks:
   plane-network:
+    # Use external network if it exists, create if it doesn't
     name: plane-network
+    external: false
     driver: bridge
