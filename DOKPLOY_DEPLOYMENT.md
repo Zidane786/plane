@@ -7,6 +7,7 @@ Complete guide for deploying Plane project management tool on your VPS using Dok
 - [Architecture Overview](#architecture-overview)
 - [Prerequisites](#prerequisites)
 - [Connecting GitHub to Dokploy](#connecting-github-to-dokploy)
+- [Network Configuration](#network-configuration-critical) ⚠️ **CRITICAL**
 - [Quick Start](#quick-start)
 - [Step-by-Step Deployment](#step-by-step-deployment)
   - [1. Deploy Infrastructure Services](#1-deploy-infrastructure-services)
@@ -187,6 +188,191 @@ After connecting, auto-deploy is configured automatically:
 
 ---
 
+## 🌐 Network Configuration (CRITICAL!)
+
+**⚠️ IMPORTANT:** All services MUST be on the same Docker network to communicate!
+
+### How Dokploy Networking Works
+
+By default, Dokploy creates **separate networks** for each app, which means:
+- ❌ plane-api **cannot** reach plane-postgres
+- ❌ plane-worker **cannot** reach plane-redis
+- ❌ plane-frontend **cannot** reach plane-api
+- ❌ Services are **ISOLATED** and will fail!
+
+### The Solution: Shared Network
+
+All services must connect to the same Docker network: `plane-network`
+
+```
+┌─────────────────────────────────────────────────┐
+│         Docker Network: plane-network           │
+├─────────────────────────────────────────────────┤
+│                                                 │
+│  [plane-api] ←→ [plane-postgres]               │
+│       ↕              ↕                          │
+│  [plane-worker] ←→ [plane-redis]               │
+│       ↕              ↕                          │
+│  [plane-frontend] ←→ [plane-rabbitmq]          │
+│       ↕              ↕                          │
+│  [plane-live] ←→ [plane-minio]                 │
+│                                                 │
+└─────────────────────────────────────────────────┘
+```
+
+### Setup Steps
+
+#### 1. Create the Network Manually (Do This First!)
+
+**Check if network exists:**
+
+```bash
+# Check existing networks
+docker network ls | grep plane-network
+
+# If it exists, you'll see:
+# xxxxxxxx   plane-network   bridge    local
+```
+
+**Create the network if it doesn't exist:**
+
+```bash
+# Create a bridge network (NOT overlay)
+docker network create plane-network
+
+# Verify it was created
+docker network ls | grep plane-network
+
+# Inspect the network
+docker network inspect plane-network
+```
+
+> **Note:** We create a **bridge** network (not overlay) because it's simpler and works perfectly for single-host deployments.
+
+#### 2. Deploy Infrastructure Services
+
+Now deploy the infrastructure services which will automatically connect to `plane-network`:
+
+```bash
+# On your VPS
+cd /opt/plane
+
+# Make sure plane-network exists first (from step 1)
+docker network ls | grep plane-network
+
+# Deploy infrastructure
+docker-compose -f docker-compose.infra.yml up -d
+
+# Verify all containers are on the network
+docker network inspect plane-network | grep Name
+# Should show: plane-postgres, plane-redis, plane-rabbitmq, plane-minio
+```
+
+#### 3. Connect Dokploy Apps to Network
+
+**For EACH Dokploy app**, you need to connect it to `plane-network`.
+
+Since Dokploy doesn't have a UI option for custom networks yet, use **Docker commands**:
+
+**Method: Docker Network Connect (After Deployment)**
+
+1. **Deploy your app in Dokploy** (without network config)
+2. **Get the container name:**
+   ```bash
+   docker ps | grep plane-api
+   # Output: abcd1234  plane-api  ...
+   ```
+
+3. **Connect to plane-network:**
+   ```bash
+   # Replace <container-name> with actual name from above
+   docker network connect plane-network <container-name>
+
+   # Example:
+   docker network connect plane-network plane-api
+   ```
+
+4. **Verify connection:**
+   ```bash
+   docker network inspect plane-network | grep plane-api
+   # Should show the container in the network
+   ```
+
+5. **Restart the app in Dokploy UI** to ensure it picks up network configuration
+
+**Alternative: Use docker-compose.infra.yml for ALL services**
+
+Instead of using Dokploy apps, deploy everything via docker-compose:
+- Easier network management
+- All services automatically on plane-network
+- See `docker-compose.yml` for reference
+
+#### 3. Verify Connectivity
+
+After connecting all apps to `plane-network`:
+
+```bash
+# Check all containers on the network
+docker network inspect plane-network | grep Name
+
+# Should show all containers:
+# - plane-postgres
+# - plane-redis
+# - plane-rabbitmq
+# - plane-minio
+# - plane-api
+# - plane-worker
+# - plane-beat-worker
+# - plane-frontend
+# - plane-live
+```
+
+#### 4. Test Communication
+
+From inside any container:
+
+```bash
+# From plane-api, test PostgreSQL connection
+docker exec -it plane-api ping plane-postgres
+
+# From plane-worker, test Redis connection
+docker exec -it plane-worker ping plane-redis
+
+# From plane-frontend, test API connection
+docker exec -it plane-frontend curl http://plane-api:8000/api/health/
+```
+
+### Container Name Resolution
+
+Once on the same network, containers can reach each other by name:
+
+| Service Type | Container Name | How Others Reach It |
+|-------------|----------------|---------------------|
+| PostgreSQL | plane-postgres | `postgresql://plane-postgres:5432` |
+| Redis | plane-redis | `redis://plane-redis:6379` |
+| RabbitMQ | plane-rabbitmq | `amqp://plane-rabbitmq:5672` |
+| MinIO | plane-minio | `http://plane-minio:9000` |
+| API | plane-api | `http://plane-api:8000` |
+| Live | plane-live | `http://plane-live:3000` |
+
+**This is why your .env files use these names!**
+
+### Common Network Issues
+
+**Issue:** "Connection refused" or "Host not found"
+- **Cause:** App not connected to `plane-network`
+- **Fix:** Connect app to network using Method 1 or 2 above
+
+**Issue:** "Name or service not known"
+- **Cause:** Wrong container name in environment variables
+- **Fix:** Use exact container names from docker-compose.infra.yml
+
+**Issue:** "Cannot connect to database"
+- **Cause:** Infrastructure services not running or not on same network
+- **Fix:** Ensure `docker-compose.infra.yml` is running and network exists
+
+---
+
 ## 🚀 Quick Start
 
 ### 1. Clone & Prepare
@@ -362,9 +548,22 @@ GUNICORN_WORKERS=2
    - Enable HTTPS (Let's Encrypt)
    - Port: `8000`
 
-6. **Network:**
-   - Make sure the app is on the same Docker network as infrastructure containers
-   - Network: `plane-network`
+6. **Network Configuration (CRITICAL!):**
+
+   **⚠️ MUST DO:** Connect to `plane-network` so API can reach PostgreSQL/Redis/RabbitMQ
+
+   After deploying the app, connect it to plane-network:
+   ```bash
+   # Get container name
+   docker ps | grep plane-api
+
+   # Connect to network (replace with actual container name)
+   docker network connect plane-network plane-api
+
+   # Restart in Dokploy UI for changes to take effect
+   ```
+
+   **Without this, the API CANNOT connect to the database!**
 
 7. **Deploy:**
    - Click "Deploy"
@@ -483,8 +682,15 @@ PYTHONUNBUFFERED=1
 PYTHONDONTWRITEBYTECODE=1
 ```
 
-4. **Network:**
-   - Network: `plane-network` (same as infrastructure)
+4. **Network Configuration (CRITICAL!):**
+
+   **⚠️ MUST DO:** Connect to `plane-network`
+
+   After deployment:
+   ```bash
+   docker network connect plane-network plane-worker
+   # Restart in Dokploy UI
+   ```
 
 5. **Domain:**
    - **No domain needed** - Workers don't serve HTTP traffic
@@ -510,8 +716,15 @@ PYTHONDONTWRITEBYTECODE=1
    - **Use exactly the same environment variables as the Worker app above**
    - Copy all variables from `.env.worker.example`
 
-4. **Network:**
-   - Network: `plane-network`
+4. **Network Configuration (CRITICAL!):**
+
+   **⚠️ MUST DO:** Connect to `plane-network`
+
+   After deployment:
+   ```bash
+   docker network connect plane-network plane-worker
+   # Restart in Dokploy UI
+   ```
 
 5. **Domain:**
    - **No domain needed**
@@ -600,7 +813,17 @@ PORT=3000
    - Enable HTTPS (Let's Encrypt)
    - Port: `3000`
 
-5. **Deploy**
+5. **Network Configuration (CRITICAL!):**
+
+   **⚠️ MUST DO:** Connect to `plane-network` so frontend can reach API
+
+   After deployment:
+   ```bash
+   docker network connect plane-network plane-frontend
+   # Restart in Dokploy UI
+   ```
+
+6. **Deploy**
 
 #### Option B: Using Nixpacks
 
@@ -687,7 +910,17 @@ traefik.http.services.plane-live.loadbalancer.server.port=3000
 
 Alternatively, expose on a different port and configure Traefik manually.
 
-4. **Deploy**
+4. **Network Configuration (CRITICAL!):**
+
+   **⚠️ MUST DO:** Connect to `plane-network` so live server can reach Redis/API
+
+   After deployment:
+   ```bash
+   docker network connect plane-network plane-live
+   # Restart in Dokploy UI
+   ```
+
+5. **Deploy**
 
 #### Verify Live Server
 
