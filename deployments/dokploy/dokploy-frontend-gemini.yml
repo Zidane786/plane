@@ -1,0 +1,82 @@
+version: "3.8"
+
+services:
+  # ============================================================================
+  # MAIN WEB APP
+  # ============================================================================
+  web:
+    image: makeplane/plane-frontend:latest
+    container_name: plane-web
+    restart: always
+    environment:
+      # ------------------------------------------------------------------------
+      # API CONNECTION
+      # ------------------------------------------------------------------------
+      - NEXT_PUBLIC_API_BASE_URL=https://api.plane.yourdomain.com
+      # ------------------------------------------------------------------------
+      # APP URLS
+      # ------------------------------------------------------------------------
+      - NEXT_PUBLIC_WEB_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_ADMIN_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_SPACE_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_LIVE_BASE_URL=https://plane.yourdomain.com
+      # ------------------------------------------------------------------------
+      # PATHS
+      # ------------------------------------------------------------------------
+      - NEXT_PUBLIC_ADMIN_BASE_PATH=/god-mode
+      - NEXT_PUBLIC_SPACE_BASE_PATH=/spaces
+      - NEXT_PUBLIC_LIVE_BASE_PATH=/live
+      # ------------------------------------------------------------------------
+      # CONFIG
+      # ------------------------------------------------------------------------
+      - NEXT_PUBLIC_DEPLOY_WITH=DOKPLOY
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+
+  # ============================================================================
+  # LIVE SERVER (REAL-TIME COLLABORATION)
+  # ============================================================================
+  live:
+    image: makeplane/plane-live:latest
+    container_name: plane-live
+    restart: always
+    environment:
+      - PORT=3000
+      - API_BASE_URL=https://api.plane.yourdomain.com
+      - CORS_ALLOWED_ORIGINS=https://plane.yourdomain.com
+    # Note: In Dokploy, you might need to map this to a different path or domain
+    # if deploying in the same stack, or rely on Traefik labels.
+    # For simplicity, this example assumes it's part of the stack but might need
+    # its own domain or path routing in Dokploy.
+
+  # ============================================================================
+  # OPTIONAL: SPACE & ADMIN
+  # ============================================================================
+  # If these are separate images in the future, add them here.
+  # Currently, 'plane-frontend' often serves all if configured correctly,
+  # or they are split. Based on the repo, 'space' and 'admin' have their own Dockerfiles.
+  
+  space:
+    image: makeplane/plane-space:latest
+    container_name: plane-space
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=https://api.plane.yourdomain.com
+      - NEXT_PUBLIC_WEB_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_SPACE_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_SPACE_BASE_PATH=/spaces
+    ports:
+      - "3001:3000"
+
+  admin:
+    image: makeplane/plane-admin:latest
+    container_name: plane-admin
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_BASE_URL=https://api.plane.yourdomain.com
+      - NEXT_PUBLIC_WEB_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_ADMIN_BASE_URL=https://plane.yourdomain.com
+      - NEXT_PUBLIC_ADMIN_BASE_PATH=/god-mode
+    ports:
+      - "3002:3000"
