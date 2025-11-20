@@ -1,0 +1,24 @@
+# Nixpacks configuration for Plane Live Server (Real-time Collaboration)
+# Deploy this as a separate app in Dokploy for live.yourdomain.com
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "pnpm"]
+
+[phases.install]
+cmds = [
+  "corepack enable",
+  "corepack prepare pnpm@10.21.0 --activate",
+  "pnpm install --frozen-lockfile"
+]
+
+[phases.build]
+cmds = [
+  "pnpm build --filter=live..."
+]
+
+[start]
+cmd = "cd apps/live && node dist/start.js"
+
+[variables]
+NODE_ENV = "production"
+PORT = "3000"

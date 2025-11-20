@@ -1,0 +1,68 @@
+# ==============================================================================
+# Plane Live Server Service - Docker Compose
+# ==============================================================================
+# Deploy this as a separate Dokploy application
+# Handles real-time collaboration via WebSockets (Hocuspocus/Yjs)
+# Served at: https://plane.mohdop.com/live (path-based routing)
+#
+# Prerequisites:
+# 1. Deploy docker-compose.infra.yml first
+# 2. Deploy docker-compose.api.yml before live server
+# 3. Ensure plane-network exists
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # ============================================================================
+  # Live Server (Real-time Collaboration)
+  # ============================================================================
+  live:
+    container_name: plane-live
+    build:
+      context: .
+      dockerfile: ./apps/live/Dockerfile.live
+      args:
+        DOCKER_BUILDKIT: 1
+    restart: always
+    environment:
+      # Server Configuration
+      PORT: 3000
+      NODE_ENV: production
+
+      # API Integration (connects to API service in plane-network)
+      API_BASE_URL: http://plane-api:8000
+      WEB_BASE_URL: ${WEB_URL}
+      LIVE_BASE_URL: ${LIVE_BASE_URL}
+      LIVE_BASE_PATH: ${LIVE_BASE_PATH:-/live}
+
+      # Authentication
+      LIVE_SERVER_SECRET_KEY: ${SECRET_KEY}
+
+      # Redis (connects to redis service in plane-network)
+      REDIS_URL: redis://plane-redis:6379/
+      REDIS_HOST: plane-redis
+      REDIS_PORT: 6379
+
+      # CORS
+      ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS}
+
+    networks:
+      - plane-network
+
+    labels:
+      # Traefik labels for path-based routing
+      - "traefik.enable=true"
+      - "traefik.http.routers.plane-live.rule=Host(`${FRONTEND_DOMAIN}`) && PathPrefix(`/live`)"
+      - "traefik.http.routers.plane-live.entrypoints=websecure"
+      - "traefik.http.routers.plane-live.tls=true"
+      - "traefik.http.routers.plane-live.tls.certresolver=letsencrypt"
+      - "traefik.http.services.plane-live.loadbalancer.server.port=3000"
+
+# ==============================================================================
+# Network Configuration
+# ==============================================================================
+networks:
+  plane-network:
+    external: true
+    name: plane-network
