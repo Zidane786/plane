@@ -1,0 +1,32 @@
+# Nixpacks configuration for Plane Frontend (Web + Admin + Space)
+# Deploy this as a separate app in Dokploy for app.yourdomain.com
+
+[phases.setup]
+nixPkgs = ["nodejs_22", "pnpm", "nginx"]
+
+[phases.install]
+cmds = [
+  "corepack enable",
+  "corepack prepare pnpm@10.21.0 --activate",
+  "pnpm install --frozen-lockfile"
+]
+
+[phases.build]
+cmds = [
+  "pnpm build --filter=web...",
+  "pnpm build --filter=admin...",
+  "pnpm build --filter=space..."
+]
+
+[start]
+cmd = "nginx -g 'daemon off;' -c /app/nginx/combined-frontend.conf"
+
+[staticAssets]
+# Built assets locations
+"/app/apps/web/build" = "/var/www/web"
+"/app/apps/admin/build" = "/var/www/admin"
+"/app/apps/space/build" = "/var/www/space"
+
+[variables]
+NODE_ENV = "production"
+PORT = "3000"
