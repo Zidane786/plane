@@ -95,11 +95,99 @@ Value: <your-vps-ip>
 2. Use the generated passwords provided
 3. Store credentials in a password manager
 
+### 🔑 **Generating Secure Credentials**
+
+All credentials in this deployment must be cryptographically secure. Use these commands to generate secrets:
+
+#### **Django SECRET_KEY** (50+ characters)
+```bash
+# Generate SECRET_KEY for Django
+python3 -c 'import secrets; print(secrets.token_urlsafe(50))'
+
+# Example output:
+# LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+```
+
+**Used in**: `.env.api`, `.env.worker`, `.env.beat-worker`, `.env.live`, `.env.migrator`
+**CRITICAL**: Must be **identical** across all these files!
+
+#### **Database Password** (32+ characters)
+```bash
+# Generate PostgreSQL password
+openssl rand -base64 32
+
+# Example output:
+# ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg=
+```
+
+**Used in**: `.env.infra`, `.env.api`, `.env.worker`, `.env.beat-worker`, `.env.migrator`
+**CRITICAL**: Must match across all files!
+
+#### **RabbitMQ Password** (32+ characters)
+```bash
+# Generate RabbitMQ password
+openssl rand -base64 32
+
+# Example output:
+# lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU=
+```
+
+**Used in**: `.env.infra`, `.env.api`, `.env.worker`, `.env.beat-worker`
+**CRITICAL**: Must match across all files!
+
+#### **Storage Credentials** (DO Spaces / AWS S3)
+
+**For Digital Ocean Spaces:**
+- Generate access keys from DO Console: https://cloud.digitalocean.com/account/api/tokens
+- Select "Spaces access keys"
+- Create new key with Read + Write permissions
+
+**For MinIO (self-hosted):**
+```bash
+# Generate MinIO access key (27 characters)
+openssl rand -base64 20 | tr -d '/+=' | head -c 27
+
+# Generate MinIO secret key (40+ characters)
+openssl rand -base64 40
+
+# Example outputs:
+# Access Key: fHr_yxVxIsgYxs479hf_Tzf74cM
+# Secret Key: Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw==
+```
+
+**Used in**: `.env.api`, `.env.worker` (and `.env.infra` only if using MinIO)
+
+#### **Quick Generate All Secrets Script**
+```bash
+#!/bin/bash
+echo "=== Plane Deployment - Secret Generation ==="
+echo ""
+echo "SECRET_KEY (use in all backend services):"
+python3 -c 'import secrets; print(secrets.token_urlsafe(50))'
+echo ""
+echo "POSTGRES_PASSWORD:"
+openssl rand -base64 32
+echo ""
+echo "RABBITMQ_PASSWORD:"
+openssl rand -base64 32
+echo ""
+echo "MINIO_ACCESS_KEY (if using self-hosted MinIO):"
+openssl rand -base64 20 | tr -d '/+=' | head -c 27
+echo ""
+echo "MINIO_SECRET_KEY (if using self-hosted MinIO):"
+openssl rand -base64 40
+echo ""
+echo "⚠️  IMPORTANT: Copy these values to a password manager NOW!"
+echo "⚠️  You will need to add them to multiple .env files"
+```
+
+**Save this script and run it once** before creating your `.env` files. Store all generated values in a password manager.
+
 ---
 
 ## Deployment Architecture
 
-Plane is deployed as **6 separate Dokploy applications**:
+Plane is deployed as **6 separate Dokploy applications** + 1 one-time migrator:
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -108,23 +196,27 @@ Plane is deployed as **6 separate Dokploy applications**:
 │  1. Infrastructure (Postgres, Redis, RabbitMQ)                 │
 │     ↓ Creates: plane-network                                   │
 │     ↓ Type: Docker Compose (3 services)                        │
-│  2. API Backend (Django)                                        │
-│     ↓ Runs migrations, creates database schema                 │
+│  2. Migrator (Database Migrations) **ONE-TIME**                 │
+│     ↓ Runs Django migrations, creates DB schema                │
+│     ↓ Type: Docker Compose (runs once, then delete)            │
+│  3. API Backend (Django)                                        │
+│     ↓ Serves REST API on plane-api.mohdop.com                  │
 │     ↓ Type: Docker Compose (needs domain: plane-api.mohdop.com)│
-│  3. Worker (Celery)                                             │
+│  4. Worker (Celery)                                             │
 │     ↓ Type: Docker Compose (no domain needed)                  │
-│  4. Beat Worker (Celery Beat)                                   │
+│  5. Beat Worker (Celery Beat)                                   │
 │     ↓ Type: Docker Compose (no domain needed)                  │
-│  5. Live Server (WebSocket)                                     │
+│  6. Live Server (WebSocket)                                     │
 │     ↓ Type: Docker Compose (proxied via frontend)              │
-│  6. Frontend (Web + Admin + Space)                              │
+│  7. Frontend (Web + Admin + Space)                              │
 │     └ Type: Nixpacks (needs domain: plane.mohdop.com)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Understanding the 6 Services:**
+**Understanding the Services:**
 - **5 Docker Compose projects** = Backend services (infra, API, worker, beat-worker, live)
 - **1 Nixpacks project** = Frontend (auto-builds React apps from `apps/app/` folder)
+- **1 One-time migrator** = Runs database migrations (delete after completion)
 - **Total containers running**: 8 (Postgres, Redis, RabbitMQ, API, Worker, Beat, Live, Frontend)
 
 **Why 6 applications?**
@@ -175,7 +267,7 @@ The infrastructure application creates the shared network and all backend servic
 ```bash
 # PostgreSQL Configuration
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
 POSTGRES_MAX_CONNECTIONS=1000
 PGDATA=/var/lib/postgresql/data
@@ -186,7 +278,7 @@ REDIS_PORT=6379
 
 # RabbitMQ Configuration
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 RABBITMQ_VHOST=plane
 ```
 
@@ -221,15 +313,83 @@ docker exec plane-postgres pg_isready -U plane
 
 ---
 
-### **Step 2: Create API Backend Application**
+### **Step 2: Run Database Migrations (ONE-TIME)**
 
-#### 2.1 **Create Application**
+**IMPORTANT:** This step runs database migrations to create all tables and schema. Run this ONCE before deploying the API.
+
+#### 2.1 **Create Migrator Application**
+
+1. Click **"Create Application"**
+2. Name: `plane-migrator`
+3. Type: **Docker Compose**
+
+#### 2.2 **Configure Docker Compose**
+
+1. Upload or paste `deployment/6-services/docker-compose.migrator.yml`
+2. Network configuration:
+   ```yaml
+   networks:
+     plane-network:
+       external: true
+       name: plane-network
+   ```
+
+#### 3.3 **Set Environment Variables**
+
+Upload all variables from `deployment/6-services/.env.migrator`:
+
+```bash
+# Django Configuration (must match API)
+SECRET_KEY=<your-generated-secret-key>
+DEBUG=0
+DJANGO_SETTINGS_MODULE=plane.settings.production
+
+# Database (must match .env.infra)
+POSTGRES_USER=plane
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+POSTGRES_DB=plane
+
+# Python
+PYTHONUNBUFFERED=1
+PYTHONDONTWRITEBYTECODE=1
+```
+
+#### 2.4 **Deploy and Monitor**
+
+1. Click **"Deploy"**
+2. Monitor logs - you should see:
+   ```
+   Operations to perform:
+     Apply all migrations: admin, auth, contenttypes, db, sessions...
+   Running migrations:
+     Applying db.0001_initial... OK
+     Applying db.0002_auto... OK
+     ... (100+ migrations)
+   Migrations completed successfully
+   ```
+3. Wait for completion (2-5 minutes)
+
+#### 2.5 **Delete Migrator (Important!)**
+
+After migrations complete successfully:
+1. **Stop** the plane-migrator application
+2. **Delete** the plane-migrator application from Dokploy
+
+**Why delete?** The migrator is a one-time job. The container has `restart: "no"` so it won't restart, but it's good practice to remove it.
+
+**Note:** For future redeployments, if you need to run new migrations, recreate this migrator service, run it once, then delete again.
+
+---
+
+### **Step 3: Create API Backend Application**
+
+#### 7.1 **Create Application**
 
 1. Click **"Create Application"**
 2. Name: `plane-api`
 3. Type: **Docker Compose**
 
-#### 2.2 **Configure Docker Compose**
+#### 3.2 **Configure Docker Compose**
 
 1. Upload or paste `deployment/6-services/docker-compose.api.yml`
 2. **Important**: Ensure the network configuration is correct:
@@ -240,14 +400,14 @@ docker exec plane-postgres pg_isready -U plane
        name: plane-network
    ```
 
-#### 2.2.1 **Configure Domain in Dokploy**
+#### 3.2.1 **Configure Domain in Dokploy**
 
 1. Go to **"Domains"** tab in the plane-api application
 2. Add domain: `plane-api.mohdop.com`
 3. Enable **HTTPS** (Let's Encrypt)
 4. Save
 
-#### 2.3 **Set Environment Variables**
+#### 3.3 **Set Environment Variables**
 
 Upload all variables from `deployment/6-services/.env.api`. **Critical variables:**
 
@@ -256,12 +416,12 @@ Upload all variables from `deployment/6-services/.env.api`. **Critical variables
 API_DOMAIN=plane-api.mohdop.com
 
 # Django
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+SECRET_KEY=<your-generated-secret-key>
 DEBUG=0
 
 # Database (must match .env.infra)
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
 DATABASE_URL=postgresql://plane:ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg@plane-postgres:5432/plane
 
@@ -270,7 +430,7 @@ REDIS_URL=redis://plane-redis:6379/
 
 # RabbitMQ (must match .env.infra)
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 CELERY_BROKER_URL=amqp://plane:lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU@plane-rabbitmq:5672/plane
 
 # URLs
@@ -305,15 +465,18 @@ SESSION_COOKIE_SECURE=1
 CSRF_COOKIE_SECURE=1
 ```
 
-#### 2.4 **Deploy**
+#### 3.4 **Deploy**
 
 1. Click **"Deploy"**
 2. Monitor logs for:
    - Database connection success
-   - Migrations running
-   - Gunicorn server starting
+   - **Skipping migrations** (already done by migrator)
+   - Gunicorn server starting on port 8000
+3. API should start within 30-60 seconds
 
-#### 2.5 **Verify API**
+**Note:** If you see "Waiting for database migrations to complete..." hanging, it means you skipped Step 2 (Migrator). Go back and run the migrator first.
+
+#### 3.5 **Verify API**
 
 ```bash
 # Check API is running
@@ -330,23 +493,23 @@ docker exec plane-api python manage.py showmigrations
 
 ---
 
-### **Step 3: Create Worker Application**
+### **Step 4: Create Worker Application**
 
-#### 3.1 **Create Application**
+#### 7.1 **Create Application**
 
 1. Name: `plane-worker`
 2. Type: **Docker Compose**
 3. Upload `deployment/6-services/docker-compose.worker.yml`
 
-#### 3.2 **Set Environment Variables**
+#### 6.2 **Set Environment Variables**
 
 Upload all variables from `deployment/6-services/.env.worker`. **Must match API credentials:**
 
 ```bash
 # Django & Database (must match API)
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+SECRET_KEY=<your-generated-secret-key>
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 
 # Storage - Digital Ocean Spaces (must match API)
 USE_MINIO=0
@@ -365,7 +528,7 @@ EMAIL_HOST_PASSWORD=your-smtp-password
 DEFAULT_FROM_EMAIL=zidane@mohdop.com
 ```
 
-#### 3.3 **Deploy**
+#### 6.3 **Deploy**
 
 ```bash
 # Verify worker is consuming tasks
@@ -377,25 +540,25 @@ docker logs plane-worker -f
 
 ---
 
-### **Step 4: Create Beat Worker Application**
+### **Step 5: Create Beat Worker Application**
 
-#### 4.1 **Create Application**
+#### 7.1 **Create Application**
 
 1. Name: `plane-beat-worker`
 2. Type: **Docker Compose**
 3. Upload `deployment/6-services/docker-compose.beat-worker.yml`
 
-#### 4.2 **Set Environment Variables**
+#### 6.2 **Set Environment Variables**
 
 Upload all variables from `deployment/6-services/.env.beat-worker`:
 
 ```bash
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+SECRET_KEY=<your-generated-secret-key>
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 ```
 
-#### 4.3 **Deploy**
+#### 6.3 **Deploy**
 
 ```bash
 # Verify beat worker is running
@@ -406,15 +569,15 @@ docker logs plane-beat-worker -f
 
 ---
 
-### **Step 5: Create Live Server Application**
+### **Step 6: Create Live Server Application**
 
-#### 5.1 **Create Application**
+#### 7.1 **Create Application**
 
 1. Name: `plane-live`
 2. Type: **Docker Compose**
 3. Upload `deployment/6-services/docker-compose.live.yml`
 
-#### 5.2 **Set Environment Variables**
+#### 6.2 **Set Environment Variables**
 
 Upload all variables from `deployment/6-services/.env.live`. **Critical: SECRET_KEY must match API!**
 
@@ -423,8 +586,8 @@ Upload all variables from `deployment/6-services/.env.live`. **Critical: SECRET_
 FRONTEND_DOMAIN=plane.mohdop.com
 
 # Authentication (MUST MATCH API!)
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-LIVE_SERVER_SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+SECRET_KEY=<your-generated-secret-key>
+LIVE_SERVER_SECRET_KEY=<your-generated-secret-key>
 
 # API (internal Docker network!)
 API_BASE_URL=http://plane-api:8000
@@ -441,7 +604,7 @@ ALLOWED_ORIGINS=https://plane.mohdop.com
 REDIS_URL=redis://plane-redis:6379/
 ```
 
-#### 5.3 **Deploy**
+#### 6.3 **Deploy**
 
 ```bash
 # Verify live server is running
@@ -454,15 +617,15 @@ curl https://plane.mohdop.com/live/health
 
 ---
 
-### **Step 6: Create Frontend Application**
+### **Step 7: Create Frontend Application**
 
-#### 6.1 **Create Application**
+#### 7.1 **Create Application**
 
 1. Name: `plane-frontend`
 2. Type: **Nixpacks** (not Docker Compose!)
 3. Repository: Select your git repository or upload codebase
 
-#### 6.2 **Configure Nixpacks**
+#### 7.2 **Configure Nixpacks**
 
 1. In application settings, go to **"Build"** tab
 2. Set **Nixpacks Config Path**: `nixpacks.frontend.toml`
@@ -471,7 +634,7 @@ curl https://plane.mohdop.com/live/health
    - Bundle them with Nginx
    - Serve on port 3000
 
-#### 6.3 **Set Environment Variables**
+#### 7.3 **Set Environment Variables**
 
 Upload all variables from `deployment/6-services/.env.frontend`:
 
@@ -507,14 +670,14 @@ NODE_ENV=production
 PORT=3000
 ```
 
-#### 6.4 **Configure Traefik Routing**
+#### 7.4 **Configure Traefik Routing**
 
 1. Go to **"Domains"** tab
 2. Add domain: `plane.mohdop.com`
 3. Enable **HTTPS** (Let's Encrypt)
 4. Save
 
-#### 6.5 **Deploy**
+#### 7.5 **Deploy**
 
 1. Click **"Deploy"**
 2. Build time: 10-15 minutes (installs dependencies, builds 3 apps)
