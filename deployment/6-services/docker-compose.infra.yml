@@ -93,67 +93,66 @@ services:
   # ============================================================================
   # MinIO S3-Compatible Object Storage + Web Console
   # ============================================================================
-  minio:
-    image: minio/minio:latest
-    container_name: plane-minio
-    restart: unless-stopped
-    environment:
-      # Map AWS variable names to MinIO's expected names
-      MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this}
-      MINIO_REGION: ${AWS_REGION:-us-east-1}
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
-    ports:
-      - "9000:9000"    # MinIO API port
-      - "9001:9001"    # MinIO Console (Web UI) port
-    networks:
-      - plane-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    labels:
-      # Dokploy/Traefik labels for MinIO Console (Web UI)
-      - "traefik.enable=true"
-
-      # MinIO Console UI
-      - "traefik.http.routers.minio-console.rule=Host(`minio.mohdop.com`)"
-      - "traefik.http.routers.minio-console.entrypoints=websecure"
-      - "traefik.http.routers.minio-console.tls=true"
-      - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.minio-console.service=minio-console"
-      - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
-
-      # MinIO API (optional, for direct S3 API access via domain)
-      - "traefik.http.routers.minio-api.rule=Host(`minio-api.mohdop.com`)"
-      - "traefik.http.routers.minio-api.entrypoints=websecure"
-      - "traefik.http.routers.minio-api.tls=true"
-      - "traefik.http.routers.minio-api.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.minio-api.service=minio-api"
-      - "traefik.http.services.minio-api.loadbalancer.server.port=9000"
+  # COMMENTED OUT: Using Digital Ocean Spaces instead
+  # Uncomment this section if you want to use self-hosted MinIO
+  # ============================================================================
+  # minio:
+  #   image: minio/minio:latest
+  #   container_name: plane-minio
+  #   restart: unless-stopped
+  #   environment:
+  #     MINIO_ROOT_USER: ${AWS_ACCESS_KEY_ID:-minioadmin}
+  #     MINIO_ROOT_PASSWORD: ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this}
+  #     MINIO_REGION: ${AWS_REGION:-us-east-1}
+  #   command: server /data --console-address ":9001"
+  #   volumes:
+  #     - minio_data:/data
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   networks:
+  #     - plane-network
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #   labels:
+  #     - "traefik.enable=true"
+  #     - "traefik.http.routers.minio-console.rule=Host(`minio.mohdop.com`)"
+  #     - "traefik.http.routers.minio-console.entrypoints=websecure"
+  #     - "traefik.http.routers.minio-console.tls=true"
+  #     - "traefik.http.routers.minio-console.tls.certresolver=letsencrypt"
+  #     - "traefik.http.routers.minio-console.service=minio-console"
+  #     - "traefik.http.services.minio-console.loadbalancer.server.port=9001"
+  #     - "traefik.http.routers.minio-api.rule=Host(`minio-api.mohdop.com`)"
+  #     - "traefik.http.routers.minio-api.entrypoints=websecure"
+  #     - "traefik.http.routers.minio-api.tls=true"
+  #     - "traefik.http.routers.minio-api.tls.certresolver=letsencrypt"
+  #     - "traefik.http.routers.minio-api.service=minio-api"
+  #     - "traefik.http.services.minio-api.loadbalancer.server.port=9000"
 
   # ============================================================================
   # MinIO Client (mc) - One-time setup to create bucket
   # ============================================================================
-  minio-setup:
-    image: minio/mc:latest
-    container_name: plane-minio-setup
-    depends_on:
-      - minio
-    networks:
-      - plane-network
-    entrypoint: >
-      /bin/sh -c "
-      sleep 10;
-      mc alias set minio http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this};
-      mc mb minio/${AWS_S3_BUCKET_NAME:-uploads} --ignore-existing;
-      mc anonymous set download minio/${AWS_S3_BUCKET_NAME:-uploads};
-      echo 'MinIO bucket ${AWS_S3_BUCKET_NAME:-uploads} created successfully';
-      exit 0;
-      "
+  # COMMENTED OUT: Not needed when using DO Spaces or AWS S3
+  # ============================================================================
+  # minio-setup:
+  #   image: minio/mc:latest
+  #   container_name: plane-minio-setup
+  #   depends_on:
+  #     - minio
+  #   networks:
+  #     - plane-network
+  #   entrypoint: >
+  #     /bin/sh -c "
+  #     sleep 10;
+  #     mc alias set minio http://minio:9000 ${AWS_ACCESS_KEY_ID:-minioadmin} ${AWS_SECRET_ACCESS_KEY:-minioadmin-password-change-this};
+  #     mc mb minio/${AWS_S3_BUCKET_NAME:-uploads} --ignore-existing;
+  #     mc anonymous set download minio/${AWS_S3_BUCKET_NAME:-uploads};
+  #     echo 'MinIO bucket created successfully';
+  #     exit 0;
+  #     "
 
 # ==============================================================================
 # Volumes for persistent data
@@ -165,8 +164,8 @@ volumes:
     name: plane-redis-data
   rabbitmq_data:
     name: plane-rabbitmq-data
-  minio_data:
-    name: plane-minio-data
+  # minio_data:
+  #   name: plane-minio-data
 
 # ==============================================================================
 # Network
