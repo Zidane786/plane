@@ -25,16 +25,20 @@ Complete step-by-step guide to deploy Plane on your Dokploy VPS.
 
 ### 2. **Domain Names**
 
-You'll need **2 domain names** pointing to your VPS:
+You'll need **2 domain names** pointing to your VPS (configured in Dokploy):
 
-| Domain | Purpose | SSL |
-|--------|---------|-----|
-| `plane.mohdop.com` | Frontend (Web, Admin, Space, Live) | Required |
-| `plane-api.mohdop.com` | Backend API | Required |
+| Domain | Purpose | Required | Configure in Dokploy |
+|--------|---------|----------|---------------------|
+| `plane.mohdop.com` | Frontend (Web, Admin, Space, Live) | ✅ Yes | Frontend app only |
+| `plane-api.mohdop.com` | Backend API | ✅ Yes | API app only |
 
-**Optional** (for admin access to infrastructure):
-- `minio.mohdop.com` - MinIO Console (S3 storage)
-- `rabbitmq.mohdop.com` - RabbitMQ Management UI
+**Optional** (for admin access to infrastructure - Traefik labels already configured):
+- `rabbitmq.mohdop.com` - RabbitMQ Management UI (always available if configured)
+- `minio.mohdop.com` - MinIO Console (**only if using self-hosted MinIO storage**, not needed for DO Spaces/AWS S3)
+
+**Note on Storage:**
+- **Using Digital Ocean Spaces or AWS S3**: MinIO domain not needed (manage via cloud provider console)
+- **Using self-hosted MinIO**: Uncomment MinIO in `docker-compose.infra.yml` and configure `minio.mohdop.com` domain
 
 **DNS Configuration:**
 ```
@@ -47,10 +51,17 @@ Name: plane-api
 Value: <your-vps-ip>
 ```
 
-### 3. **External Services** (if using AI features)
+### 3. **External Services**
 
-- **OpenAI API Key**: Get from https://platform.openai.com/api-keys
-- **Email Provider**: SMTP credentials for sending emails (Gmail, SendGrid, etc.)
+**Required:**
+- **Digital Ocean Spaces** (or AWS S3): S3-compatible object storage
+  - Create a Space in DO Console
+  - Generate access keys with **Read + Write** permissions
+  - Note the region (e.g., nyc3, sfo3, ams3)
+
+**Optional:**
+- **OpenAI API Key**: Get from https://platform.openai.com/api-keys (can add later via admin panel)
+- **Custom SMTP Server**: For sending notification emails
 
 ### 4. **Repository Access**
 
@@ -94,22 +105,39 @@ Plane is deployed as **6 separate Dokploy applications**:
 ┌─────────────────────────────────────────────────────────────────┐
 │                      DEPLOYMENT ORDER                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  1. Infrastructure (Postgres, Redis, RabbitMQ, MinIO)          │
+│  1. Infrastructure (Postgres, Redis, RabbitMQ)                 │
 │     ↓ Creates: plane-network                                   │
+│     ↓ Type: Docker Compose (3 services)                        │
 │  2. API Backend (Django)                                        │
 │     ↓ Runs migrations, creates database schema                 │
+│     ↓ Type: Docker Compose (needs domain: plane-api.mohdop.com)│
 │  3. Worker (Celery)                                             │
+│     ↓ Type: Docker Compose (no domain needed)                  │
 │  4. Beat Worker (Celery Beat)                                   │
+│     ↓ Type: Docker Compose (no domain needed)                  │
 │  5. Live Server (WebSocket)                                     │
+│     ↓ Type: Docker Compose (proxied via frontend)              │
 │  6. Frontend (Web + Admin + Space)                              │
+│     └ Type: Nixpacks (needs domain: plane.mohdop.com)          │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Understanding the 6 Services:**
+- **5 Docker Compose projects** = Backend services (infra, API, worker, beat-worker, live)
+- **1 Nixpacks project** = Frontend (auto-builds React apps from `apps/app/` folder)
+- **Total containers running**: 8 (Postgres, Redis, RabbitMQ, API, Worker, Beat, Live, Frontend)
 
 **Why 6 applications?**
 - **Separation of concerns**: Each service can scale independently
 - **Better resource management**: Control CPU/memory per service
 - **Easier debugging**: Isolate issues to specific services
 - **Flexibility**: Update/restart individual services without affecting others
+
+**Domain Configuration in Dokploy:**
+- Only 2 services need domains configured in Dokploy's "Domains" tab:
+  - **Frontend**: `plane.mohdop.com`
+  - **API**: `plane-api.mohdop.com`
+- Other services either run internally or use Traefik labels (RabbitMQ UI)
 
 ---
 
@@ -129,38 +157,40 @@ The infrastructure application creates the shared network and all backend servic
 #### 1.2 **Configure Docker Compose**
 
 1. In the application settings, go to **"Compose"** tab
-2. Upload or paste the contents of `docker-compose.infra.yml`
-3. Ensure the file contains all 5 services:
-   - `postgres`
-   - `redis`
-   - `rabbitmq`
-   - `minio`
-   - `minio-setup`
+2. Upload or paste the contents of `deployment/6-services/docker-compose.infra.yml`
+3. The file contains these services:
+   - `postgres` - PostgreSQL database
+   - `redis` - Redis cache
+   - `rabbitmq` - RabbitMQ message broker
+   - `minio` + `minio-setup` - **COMMENTED OUT** (using DO Spaces instead)
+
+**Note:** MinIO services are commented out by default. If you want to use self-hosted MinIO instead of DO Spaces/AWS S3, uncomment the MinIO sections in the docker-compose file.
 
 #### 1.3 **Set Environment Variables**
 
 1. Go to **"Environment"** tab
-2. Click **"Add Environment Variable"** or upload `.env.infra`
+2. Click **"Add Environment Variable"** or upload `deployment/6-services/.env.infra`
 3. Add all variables from `.env.infra`:
 
 ```bash
+# PostgreSQL Configuration
 POSTGRES_USER=plane
 POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
 POSTGRES_DB=plane
 POSTGRES_MAX_CONNECTIONS=1000
+PGDATA=/var/lib/postgresql/data
 
+# Redis Configuration
 REDIS_HOST=plane-redis
 REDIS_PORT=6379
 
+# RabbitMQ Configuration
 RABBITMQ_USER=plane
 RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
 RABBITMQ_VHOST=plane
-
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
-AWS_S3_BUCKET_NAME=uploads
-AWS_REGION=us-east-1
 ```
+
+**Note:** Storage (S3) credentials are NOT needed in infra env file when using DO Spaces/AWS S3. They go in the API and worker env files only.
 
 #### 1.4 **Deploy**
 
@@ -176,18 +206,17 @@ Run these commands on your VPS:
 # Check all containers are running
 docker ps | grep plane
 
-# Should show:
+# Should show (3 containers):
 # plane-postgres
 # plane-redis
 # plane-rabbitmq
-# plane-minio
 
 # Check network exists
 docker network inspect plane-network
 
-# Check MinIO bucket was created
-docker exec plane-minio mc ls minio/
-# Should show: uploads/
+# Verify postgres is accepting connections
+docker exec plane-postgres pg_isready -U plane
+# Should show: accepting connections
 ```
 
 ---
@@ -202,7 +231,7 @@ docker exec plane-minio mc ls minio/
 
 #### 2.2 **Configure Docker Compose**
 
-1. Upload or paste `docker-compose.api.yml`
+1. Upload or paste `deployment/6-services/docker-compose.api.yml`
 2. **Important**: Ensure the network configuration is correct:
    ```yaml
    networks:
@@ -211,9 +240,16 @@ docker exec plane-minio mc ls minio/
        name: plane-network
    ```
 
+#### 2.2.1 **Configure Domain in Dokploy**
+
+1. Go to **"Domains"** tab in the plane-api application
+2. Add domain: `plane-api.mohdop.com`
+3. Enable **HTTPS** (Let's Encrypt)
+4. Save
+
 #### 2.3 **Set Environment Variables**
 
-Upload all variables from `.env.api`. **Critical variables:**
+Upload all variables from `deployment/6-services/.env.api`. **Critical variables:**
 
 ```bash
 # Traefik Routing
@@ -242,24 +278,26 @@ WEB_URL=https://plane.mohdop.com
 API_BASE_URL=https://plane-api.mohdop.com
 CORS_ALLOWED_ORIGINS=https://plane.mohdop.com
 
-# Storage (must match .env.infra)
-USE_MINIO=1
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
-AWS_S3_ENDPOINT_URL=http://plane-minio:9000
-AWS_S3_BUCKET_NAME=uploads
+# Storage - Digital Ocean Spaces (S3-compatible)
+# Choose ONE: DO Spaces (active), AWS S3, or MinIO (see .env.api for all options)
+USE_MINIO=0
+AWS_ACCESS_KEY_ID=your-do-spaces-access-key
+AWS_SECRET_ACCESS_KEY=your-do-spaces-secret-key
+AWS_REGION=nyc3
+AWS_S3_ENDPOINT_URL=https://nyc3.digitaloceanspaces.com
+AWS_S3_BUCKET_NAME=your-space-name
 
-# AI (OpenAI)
+# AI (OpenAI) - Optional, can configure later via god-mode admin panel
 OPENAI_API_KEY=your-openai-api-key-here
 GPT_ENGINE=gpt-4
 
-# Email (update with your SMTP settings)
-EMAIL_HOST=smtp.gmail.com
+# Email - Custom SMTP Server
+EMAIL_HOST=mail.mohdop.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=1
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
-DEFAULT_FROM_EMAIL=noreply@mohdop.com
+EMAIL_HOST_USER=zidane@mohdop.com
+EMAIL_HOST_PASSWORD=your-smtp-password
+DEFAULT_FROM_EMAIL=zidane@mohdop.com
 
 # Security
 ALLOWED_HOSTS=plane-api.mohdop.com,localhost
@@ -298,25 +336,33 @@ docker exec plane-api python manage.py showmigrations
 
 1. Name: `plane-worker`
 2. Type: **Docker Compose**
-3. Upload `docker-compose.worker.yml`
+3. Upload `deployment/6-services/docker-compose.worker.yml`
 
 #### 3.2 **Set Environment Variables**
 
-Upload all variables from `.env.worker`. **Must match API credentials:**
+Upload all variables from `deployment/6-services/.env.worker`. **Must match API credentials:**
 
 ```bash
+# Django & Database (must match API)
 SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
 POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
 RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
 
-# Email settings (for sending notification emails)
-EMAIL_HOST=smtp.gmail.com
+# Storage - Digital Ocean Spaces (must match API)
+USE_MINIO=0
+AWS_ACCESS_KEY_ID=your-do-spaces-access-key
+AWS_SECRET_ACCESS_KEY=your-do-spaces-secret-key
+AWS_REGION=nyc3
+AWS_S3_ENDPOINT_URL=https://nyc3.digitaloceanspaces.com
+AWS_S3_BUCKET_NAME=your-space-name
+
+# Email - Custom SMTP Server (for sending notification emails)
+EMAIL_HOST=mail.mohdop.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=1
-EMAIL_HOST_USER=your-email@gmail.com
-EMAIL_HOST_PASSWORD=your-app-password
+EMAIL_HOST_USER=zidane@mohdop.com
+EMAIL_HOST_PASSWORD=your-smtp-password
+DEFAULT_FROM_EMAIL=zidane@mohdop.com
 ```
 
 #### 3.3 **Deploy**
@@ -337,11 +383,11 @@ docker logs plane-worker -f
 
 1. Name: `plane-beat-worker`
 2. Type: **Docker Compose**
-3. Upload `docker-compose.beat-worker.yml`
+3. Upload `deployment/6-services/docker-compose.beat-worker.yml`
 
 #### 4.2 **Set Environment Variables**
 
-Upload all variables from `.env.beat-worker`:
+Upload all variables from `deployment/6-services/.env.beat-worker`:
 
 ```bash
 SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
@@ -366,11 +412,11 @@ docker logs plane-beat-worker -f
 
 1. Name: `plane-live`
 2. Type: **Docker Compose**
-3. Upload `docker-compose.live.yml`
+3. Upload `deployment/6-services/docker-compose.live.yml`
 
 #### 5.2 **Set Environment Variables**
 
-Upload all variables from `.env.live`. **Critical: SECRET_KEY must match API!**
+Upload all variables from `deployment/6-services/.env.live`. **Critical: SECRET_KEY must match API!**
 
 ```bash
 # Routing
@@ -427,7 +473,7 @@ curl https://plane.mohdop.com/live/health
 
 #### 6.3 **Set Environment Variables**
 
-Upload all variables from `.env.frontend`:
+Upload all variables from `deployment/6-services/.env.frontend`:
 
 ```bash
 # API
@@ -494,16 +540,15 @@ curl https://plane.mohdop.com/
 ```bash
 docker ps | grep plane
 
-# Should show 10+ containers:
+# Should show 8 containers:
 # - plane-postgres
 # - plane-redis
 # - plane-rabbitmq
-# - plane-minio
 # - plane-api
 # - plane-worker
 # - plane-beat-worker
 # - plane-live
-# - plane-frontend (or similar from Nixpacks)
+# - plane-frontend (or similar name from Nixpacks)
 ```
 
 #### 2. **Network Connectivity**
@@ -530,13 +575,13 @@ curl -I https://plane.mohdop.com/
 curl https://plane.mohdop.com/live/health
 # Expected: success
 
-# MinIO (if domain configured)
-curl https://minio.mohdop.com/
-# Expected: MinIO Console UI
-
-# RabbitMQ (if domain configured)
+# RabbitMQ Management UI (if domain configured)
 curl https://rabbitmq.mohdop.com/
 # Expected: RabbitMQ Management UI
+
+# Storage Health (Digital Ocean Spaces)
+# Check via DO Console: https://cloud.digitalocean.com/spaces
+# Or test upload via Plane god-mode after deployment
 ```
 
 #### 4. **Database Migrations**
@@ -601,9 +646,23 @@ docker exec plane-api env | grep POSTGRES
 #### Issue: "File upload fails"
 
 **Check:**
-1. MinIO is running: `docker ps | grep minio`
-2. Bucket exists: `docker exec plane-minio mc ls minio/`
-3. Check credentials in `.env.api`
+1. Verify S3 credentials in `.env.api`:
+   ```bash
+   docker exec plane-api env | grep AWS
+   ```
+2. For Digital Ocean Spaces:
+   - Verify Space exists in DO Console
+   - Check CORS configuration on the Space
+   - Verify access key has read/write permissions
+3. Test connectivity:
+   ```bash
+   docker exec plane-api python manage.py shell
+   # In shell: test S3 connection
+   ```
+4. Check API logs for S3 errors:
+   ```bash
+   docker logs plane-api -f | grep -i s3
+   ```
 
 #### Issue: "Emails not sending"
 
@@ -628,8 +687,18 @@ docker exec plane-postgres pg_dump -U plane plane > plane-backup-$(date +%Y%m%d)
 cat plane-backup-20250119.sql | docker exec -i plane-postgres psql -U plane plane
 ```
 
-#### 2. **MinIO Backup**
+#### 2. **Storage Backup**
 
+**Digital Ocean Spaces:**
+- Snapshots are managed via DO Console
+- Enable versioning on your Space for automatic backups
+- OR use `rclone` to sync to another location:
+```bash
+# Install rclone and configure for DO Spaces
+rclone sync do-spaces:your-space-name /local/backup/path
+```
+
+**If using self-hosted MinIO:**
 ```bash
 # Backup MinIO data volume
 docker run --rm -v plane-minio-data:/data -v $(pwd):/backup alpine tar czf /backup/minio-backup-$(date +%Y%m%d).tar.gz /data
