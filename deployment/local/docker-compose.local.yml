@@ -1,0 +1,265 @@
+# ==============================================================================
+# Plane Local Development - All-in-One Docker Compose
+# ==============================================================================
+# This file runs ALL Plane services locally for development.
+#
+# Usage:
+#   cd deployment/local
+#   docker-compose -f docker-compose.local.yml up -d
+#
+# Services included:
+#   - PostgreSQL (database)
+#   - Redis (cache)
+#   - RabbitMQ (message broker)
+#   - MinIO (local S3 storage)
+#   - API (Django backend)
+#   - Worker (Celery)
+#   - Beat Worker (Celery scheduler)
+#   - Live Server (WebSocket)
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # Infrastructure Services
+  # ============================================================================
+
+  # PostgreSQL Database
+  postgres:
+    container_name: plane-local-postgres
+    image: postgres:15.7-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+    volumes:
+      - plane-local-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - plane-local-network
+
+  # Redis Cache
+  redis:
+    container_name: plane-local-redis
+    image: valkey/valkey:7.2.7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - plane-local-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - plane-local-network
+
+  # RabbitMQ Message Broker
+  rabbitmq:
+    container_name: plane-local-rabbitmq
+    image: rabbitmq:3.13.6-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+      RABBITMQ_DEFAULT_VHOST: ${RABBITMQ_VHOST}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - plane-local-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - plane-local-network
+
+  # MinIO Object Storage (Local S3)
+  minio:
+    container_name: plane-local-minio
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - plane-local-minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - plane-local-network
+
+  # MinIO Setup (Creates bucket on first run)
+  minio-setup:
+    container_name: plane-local-minio-setup
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set plane-minio http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb plane-minio/${AWS_S3_BUCKET_NAME} --ignore-existing;
+      mc anonymous set public plane-minio/${AWS_S3_BUCKET_NAME};
+      exit 0;
+      "
+    networks:
+      - plane-local-network
+
+  # ============================================================================
+  # Application Services
+  # ============================================================================
+
+  # Database Migrator (One-time)
+  migrator:
+    container_name: plane-local-migrator
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.api
+    restart: "no"
+    command: ./bin/docker-entrypoint-migrator.sh
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - plane-local-network
+
+  # API Backend (Django)
+  api:
+    container_name: plane-local-api
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.api
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-api.sh
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST}
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - plane-local-network
+
+  # Celery Worker
+  worker:
+    container_name: plane-local-worker
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.api
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-worker.sh
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST}
+      AWS_S3_ENDPOINT_URL: http://minio:9000
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - plane-local-network
+
+  # Celery Beat Worker (Scheduler)
+  beat-worker:
+    container_name: plane-local-beat-worker
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.api
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-beat.sh
+    env_file:
+      - .env.local
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379/
+      CELERY_BROKER_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/${RABBITMQ_VHOST}
+    depends_on:
+      api:
+        condition: service_started
+    networks:
+      - plane-local-network
+
+  # Live Server (WebSocket)
+  live:
+    container_name: plane-local-live
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile.api
+    restart: unless-stopped
+    command: ./bin/docker-entrypoint-live.sh
+    env_file:
+      - .env.local
+    environment:
+      REDIS_URL: redis://redis:6379/
+      API_BASE_URL: http://api:8000
+    ports:
+      - "3005:3000"
+    depends_on:
+      api:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - plane-local-network
+
+# ==============================================================================
+# Networks
+# ==============================================================================
+networks:
+  plane-local-network:
+    driver: bridge
+    name: plane-local-network
+
+# ==============================================================================
+# Volumes
+# ==============================================================================
+volumes:
+  plane-local-postgres-data:
+    name: plane-local-postgres-data
+  plane-local-redis-data:
+    name: plane-local-redis-data
+  plane-local-rabbitmq-data:
+    name: plane-local-rabbitmq-data
+  plane-local-minio-data:
+    name: plane-local-minio-data

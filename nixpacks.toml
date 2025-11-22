@@ -1,5 +1,10 @@
 # Nixpacks configuration for Plane Frontend (Web + Admin + Space)
 # Deploy this as a separate app in Dokploy for app.yourdomain.com
+#
+# Build Output:
+#   - Web app:   /app/apps/web/build/client/   → served at /
+#   - Admin app: /app/apps/admin/build/client/ → served at /god-mode
+#   - Space app: /app/apps/space/build/client/ → served at /spaces
 
 [phases.setup]
 nixPkgs = ["nodejs_22", "pnpm", "nginx"]
@@ -11,19 +16,20 @@ cmds = [
 
 [phases.build]
 cmds = [
+  # Build all three frontend apps
   "pnpm build --filter=web...",
   "pnpm build --filter=admin...",
-  "pnpm build --filter=space..."
+  "pnpm build --filter=space...",
+  # Create nginx serving directories
+  "mkdir -p /var/www/web /var/www/admin /var/www/space",
+  # Copy built assets to nginx serving directories
+  "cp -r /app/apps/web/build/client/* /var/www/web/",
+  "cp -r /app/apps/admin/build/client/* /var/www/admin/",
+  "cp -r /app/apps/space/build/client/* /var/www/space/"
 ]
 
 [start]
 cmd = "nginx -g 'daemon off;' -c /app/nginx/combined-frontend.conf"
-
-[staticAssets]
-# Built assets locations
-"/app/apps/web/build" = "/var/www/web"
-"/app/apps/admin/build" = "/var/www/admin"
-"/app/apps/space/build" = "/var/www/space"
 
 [variables]
 NODE_ENV = "production"
