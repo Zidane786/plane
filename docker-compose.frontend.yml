@@ -1,0 +1,55 @@
+# ==============================================================================
+# Plane Combined Frontend - Docker Compose for Dokploy
+# ==============================================================================
+# This docker-compose file builds and deploys all frontend apps (web, admin, space)
+# in a single container served by nginx.
+#
+# Usage in Dokploy:
+#   1. Create a new "Docker Compose" application
+#   2. Point to this file: docker-compose.frontend.yml
+#   3. Set environment variables in Dokploy UI or use .env.frontend
+#   4. Deploy
+#
+# Routes:
+#   - / -> Web app (main application)
+#   - /god-mode -> Admin app
+#   - /spaces -> Space app
+# ==============================================================================
+
+services:
+  frontend:
+    container_name: plane-frontend
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        # API Configuration
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-https://plane-api.example.com}
+        # Web App
+        NEXT_PUBLIC_WEB_BASE_URL: ${NEXT_PUBLIC_WEB_BASE_URL:-https://plane.example.com}
+        NEXT_PUBLIC_WEB_BASE_PATH: ${NEXT_PUBLIC_WEB_BASE_PATH:-}
+        # Admin App
+        NEXT_PUBLIC_ADMIN_BASE_URL: ${NEXT_PUBLIC_ADMIN_BASE_URL:-https://plane.example.com}
+        NEXT_PUBLIC_ADMIN_BASE_PATH: ${NEXT_PUBLIC_ADMIN_BASE_PATH:-/god-mode}
+        # Space App
+        NEXT_PUBLIC_SPACE_BASE_URL: ${NEXT_PUBLIC_SPACE_BASE_URL:-https://plane.example.com}
+        NEXT_PUBLIC_SPACE_BASE_PATH: ${NEXT_PUBLIC_SPACE_BASE_PATH:-/spaces}
+        # Live Server
+        NEXT_PUBLIC_LIVE_BASE_URL: ${NEXT_PUBLIC_LIVE_BASE_URL:-https://plane.example.com}
+        NEXT_PUBLIC_LIVE_BASE_PATH: ${NEXT_PUBLIC_LIVE_BASE_PATH:-/live}
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    labels:
+      # Traefik labels for Dokploy (adjust domain as needed)
+      - "traefik.enable=true"
+      - "traefik.http.routers.plane-frontend.rule=Host(`${APP_DOMAIN:-plane.example.com}`)"
+      - "traefik.http.routers.plane-frontend.entrypoints=websecure"
+      - "traefik.http.routers.plane-frontend.tls.certresolver=letsencrypt"
+      - "traefik.http.services.plane-frontend.loadbalancer.server.port=3000"

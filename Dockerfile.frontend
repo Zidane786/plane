@@ -1,0 +1,114 @@
+# syntax=docker/dockerfile:1.7
+# ==============================================================================
+# Plane Combined Frontend Dockerfile
+# ==============================================================================
+# Builds all three frontend apps (web, admin, space) into a single container
+# and serves them via nginx on different paths:
+#   - / -> Web app
+#   - /god-mode -> Admin app
+#   - /spaces -> Space app
+# ==============================================================================
+
+FROM node:22-alpine AS base
+
+# Setup pnpm package manager
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+RUN corepack enable
+
+# *****************************************************************************
+# STAGE 1: Prune the monorepo for frontend apps
+# *****************************************************************************
+FROM base AS builder
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+ARG TURBO_VERSION=2.5.6
+RUN corepack enable pnpm && pnpm add -g turbo@${TURBO_VERSION}
+COPY . .
+
+# Prune for all frontend apps
+RUN turbo prune --scope=web --scope=admin --scope=space --docker
+
+# *****************************************************************************
+# STAGE 2: Install dependencies & build all frontend apps
+# *****************************************************************************
+FROM base AS installer
+
+RUN apk add --no-cache libc6-compat
+WORKDIR /app
+
+# First install the dependencies (as they change less often)
+COPY .gitignore .gitignore
+COPY --from=builder /app/out/json/ .
+COPY --from=builder /app/out/pnpm-lock.yaml ./pnpm-lock.yaml
+RUN corepack enable pnpm
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store pnpm fetch --store-dir=/pnpm/store
+
+# Build the project
+COPY --from=builder /app/out/full/ .
+COPY turbo.json turbo.json
+RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store CI=true pnpm install --offline --frozen-lockfile --store-dir=/pnpm/store
+
+# ==============================================================================
+# Build Arguments - Set these when building the image
+# ==============================================================================
+# API Configuration
+ARG NEXT_PUBLIC_API_BASE_URL=""
+ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+
+# Web App Configuration
+ARG NEXT_PUBLIC_WEB_BASE_URL=""
+ENV NEXT_PUBLIC_WEB_BASE_URL=$NEXT_PUBLIC_WEB_BASE_URL
+ARG NEXT_PUBLIC_WEB_BASE_PATH=""
+ENV NEXT_PUBLIC_WEB_BASE_PATH=$NEXT_PUBLIC_WEB_BASE_PATH
+
+# Admin App Configuration
+ARG NEXT_PUBLIC_ADMIN_BASE_URL=""
+ENV NEXT_PUBLIC_ADMIN_BASE_URL=$NEXT_PUBLIC_ADMIN_BASE_URL
+ARG NEXT_PUBLIC_ADMIN_BASE_PATH="/god-mode"
+ENV NEXT_PUBLIC_ADMIN_BASE_PATH=$NEXT_PUBLIC_ADMIN_BASE_PATH
+
+# Space App Configuration
+ARG NEXT_PUBLIC_SPACE_BASE_URL=""
+ENV NEXT_PUBLIC_SPACE_BASE_URL=$NEXT_PUBLIC_SPACE_BASE_URL
+ARG NEXT_PUBLIC_SPACE_BASE_PATH="/spaces"
+ENV NEXT_PUBLIC_SPACE_BASE_PATH=$NEXT_PUBLIC_SPACE_BASE_PATH
+
+# Live Server Configuration
+ARG NEXT_PUBLIC_LIVE_BASE_URL=""
+ENV NEXT_PUBLIC_LIVE_BASE_URL=$NEXT_PUBLIC_LIVE_BASE_URL
+ARG NEXT_PUBLIC_LIVE_BASE_PATH="/live"
+ENV NEXT_PUBLIC_LIVE_BASE_PATH=$NEXT_PUBLIC_LIVE_BASE_PATH
+
+# Disable telemetry
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV TURBO_TELEMETRY_DISABLED=1
+
+# Build all three frontend apps
+RUN pnpm turbo run build --filter=web --filter=admin --filter=space
+
+# *****************************************************************************
+# STAGE 3: Serve with nginx
+# *****************************************************************************
+FROM nginx:1.27-alpine AS production
+
+# Copy custom nginx configuration (Docker-specific version)
+COPY nginx/docker-frontend.conf /etc/nginx/nginx.conf
+
+# Create serving directories
+RUN mkdir -p /var/www/web /var/www/admin /var/www/space
+
+# Copy built assets from installer stage
+COPY --from=installer /app/apps/web/build/client /var/www/web
+COPY --from=installer /app/apps/admin/build/client /var/www/admin
+COPY --from=installer /app/apps/space/build/client /var/www/space
+
+# Expose port 3000
+EXPOSE 3000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wget -q --spider http://127.0.0.1:3000/health || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
