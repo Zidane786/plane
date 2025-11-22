@@ -20,8 +20,8 @@ services:
   live:
     container_name: plane-live
     build:
-      context: .
-      dockerfile: ./apps/live/Dockerfile.live
+      context: ../../
+      dockerfile: apps/live/Dockerfile.live
       args:
         DOCKER_BUILDKIT: 1
     restart: always

@@ -20,7 +20,7 @@ services:
     container_name: plane-api
     build:
       context: ../../
-      dockerfile: ./apps/api/Dockerfile.api
+      dockerfile: apps/api/Dockerfile.api
       args:
         DOCKER_BUILDKIT: 1
     restart: always
@@ -119,7 +119,7 @@ services:
     container_name: plane-worker
     build:
       context: ../../
-      dockerfile: ./apps/api/Dockerfile.api
+      dockerfile: apps/api/Dockerfile.api
       args:
         DOCKER_BUILDKIT: 1
     restart: always
@@ -190,7 +190,7 @@ services:
     container_name: plane-beat-worker
     build:
       context: ../../
-      dockerfile: ./apps/api/Dockerfile.api
+      dockerfile: apps/api/Dockerfile.api
       args:
         DOCKER_BUILDKIT: 1
     restart: always
@@ -235,7 +235,7 @@ services:
     container_name: plane-live
     build:
       context: ../../
-      dockerfile: ./apps/live/Dockerfile.live
+      dockerfile: apps/live/Dockerfile.live
       args:
         DOCKER_BUILDKIT: 1
     restart: always

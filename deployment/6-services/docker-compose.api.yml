@@ -19,7 +19,7 @@ services:
   api:
     container_name: plane-api
     build:
-      context: ./apps/api
+      context: ../../apps/api
       dockerfile: Dockerfile.api
       args:
         DOCKER_BUILDKIT: 1

@@ -19,7 +19,7 @@ services:
   beat-worker:
     container_name: plane-beat-worker
     build:
-      context: ./apps/api
+      context: ../../apps/api
       dockerfile: Dockerfile.api
       args:
         DOCKER_BUILDKIT: 1
