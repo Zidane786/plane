@@ -24,11 +24,8 @@ deployment/
 │   ├── docker-compose.beat-worker.yml ← Celery beat scheduler
 │   ├── docker-compose.live.yml        ← Live server (WebSocket)
 │   │
-│   ├── nixpacks.frontend.toml         ← Frontend build config
-│   ├── nixpacks.api.toml              ← API build config (optional)
-│   ├── nixpacks.worker.toml           ← Worker build config (optional)
-│   ├── nixpacks.beat-worker.toml      ← Beat build config (optional)
-│   ├── nixpacks.live.toml             ← Live build config (optional)
+│   ├── nixpacks.frontend.toml         ← Frontend build config (Nixpacks)
+│   │                                   Note: Backend uses Docker Compose, not Nixpacks
 │   │
 │   ├── .env.infra                     ← Infrastructure env vars ✅ SECURE
 │   ├── .env.api                       ← API env vars ✅ SECURE
@@ -75,19 +72,19 @@ All `.env` files have **cryptographically secure** credentials:
 
 ```bash
 # Django SECRET_KEY (67 characters)
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+SECRET_KEY=<your-generated-secret-key>
 
 # PostgreSQL password (43 characters)
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 
 # RabbitMQ password (43 characters)
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 
 # MinIO access key (27 characters)
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
+AWS_ACCESS_KEY_ID=<your-storage-access-key>
 
 # MinIO secret key (55 characters)
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+AWS_SECRET_ACCESS_KEY=<your-storage-secret-key>
 ```
 
 **⚠️ Important**: These are YOUR production credentials. Keep them secure!
@@ -173,11 +170,11 @@ DEFAULT_FROM_EMAIL=noreply@mohdop.com
 
 | Category | 6-Services | Consolidated | Purpose |
 |----------|------------|--------------|---------|
-| **Docker Compose** | 5 files | 2 files | Service definitions |
-| **Nixpacks Configs** | 5 files | 1 file | Build configurations |
+| **Docker Compose** | 5 files | 2 files | Service definitions (backend) |
+| **Nixpacks Configs** | 1 file | 1 file | Build config (frontend only) |
 | **Environment Files** | 6 files | 3 files | Environment variables |
 | **Documentation** | 2 files | 2 files | Deployment guides |
-| **Total** | **18 files** | **8 files** | - |
+| **Total** | **14 files** | **8 files** | - |
 
 ---
 

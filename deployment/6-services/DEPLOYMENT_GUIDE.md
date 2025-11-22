@@ -145,7 +145,7 @@ The infrastructure application creates the shared network and all backend servic
 
 ```bash
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
 POSTGRES_MAX_CONNECTIONS=1000
 
@@ -153,11 +153,11 @@ REDIS_HOST=plane-redis
 REDIS_PORT=6379
 
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 RABBITMQ_VHOST=plane
 
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+AWS_ACCESS_KEY_ID=<your-storage-access-key>
+AWS_SECRET_ACCESS_KEY=<your-storage-secret-key>
 AWS_S3_BUCKET_NAME=uploads
 AWS_REGION=us-east-1
 ```
@@ -220,22 +220,22 @@ Upload all variables from `.env.api`. **Critical variables:**
 API_DOMAIN=plane-api.mohdop.com
 
 # Django
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+SECRET_KEY=<your-generated-secret-key>
 DEBUG=0
 
 # Database (must match .env.infra)
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
-DATABASE_URL=postgresql://plane:ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg@plane-postgres:5432/plane
+DATABASE_URL=postgresql://plane:<your-generated-postgres-password>@plane-postgres:5432/plane
 
 # Redis
 REDIS_URL=redis://plane-redis:6379/
 
 # RabbitMQ (must match .env.infra)
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
-CELERY_BROKER_URL=amqp://plane:lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU@plane-rabbitmq:5672/plane
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
+CELERY_BROKER_URL=amqp://plane:<your-generated-rabbitmq-password>@plane-rabbitmq:5672/plane
 
 # URLs
 WEB_URL=https://plane.mohdop.com
@@ -244,8 +244,8 @@ CORS_ALLOWED_ORIGINS=https://plane.mohdop.com
 
 # Storage (must match .env.infra)
 USE_MINIO=1
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+AWS_ACCESS_KEY_ID=<your-storage-access-key>
+AWS_SECRET_ACCESS_KEY=<your-storage-secret-key>
 AWS_S3_ENDPOINT_URL=http://plane-minio:9000
 AWS_S3_BUCKET_NAME=uploads
 
@@ -305,11 +305,11 @@ docker exec plane-api python manage.py showmigrations
 Upload all variables from `.env.worker`. **Must match API credentials:**
 
 ```bash
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+SECRET_KEY=<your-generated-secret-key>
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
+AWS_ACCESS_KEY_ID=<your-storage-access-key>
+AWS_SECRET_ACCESS_KEY=<your-storage-secret-key>
 
 # Email settings (for sending notification emails)
 EMAIL_HOST=smtp.gmail.com
@@ -344,9 +344,9 @@ docker logs plane-worker -f
 Upload all variables from `.env.beat-worker`:
 
 ```bash
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+SECRET_KEY=<your-generated-secret-key>
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 ```
 
 #### 4.3 **Deploy**
@@ -377,8 +377,8 @@ Upload all variables from `.env.live`. **Critical: SECRET_KEY must match API!**
 FRONTEND_DOMAIN=plane.mohdop.com
 
 # Authentication (MUST MATCH API!)
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-LIVE_SERVER_SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+SECRET_KEY=<your-generated-secret-key>
+LIVE_SERVER_SECRET_KEY=<your-generated-secret-key>
 
 # API (internal Docker network!)
 API_BASE_URL=http://plane-api:8000

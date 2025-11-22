@@ -6,8 +6,6 @@ nixPkgs = ["nodejs_22", "pnpm", "nginx"]
 
 [phases.install]
 cmds = [
-  "corepack enable",
-  "corepack prepare pnpm@10.21.0 --activate",
   "pnpm install --frozen-lockfile"
 ]
 

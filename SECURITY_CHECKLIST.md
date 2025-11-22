@@ -26,15 +26,35 @@ Complete security checklist for deploying and maintaining Plane in production.
 - [ ] All passwords are stored securely (password manager)
 - [ ] No default credentials remain (no "plane", "admin", "password")
 
-**Generated Credentials (from `.env` files):**
+**How to Generate Credentials:**
 ```bash
-# These are already secure - DO NOT change them unless you regenerate everywhere!
-SECRET_KEY=LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+# Django SECRET_KEY (50+ characters)
+python3 -c 'import secrets; print(secrets.token_urlsafe(50))'
+
+# PostgreSQL Password (32+ characters)
+openssl rand -base64 32
+
+# RabbitMQ Password (32+ characters)
+openssl rand -base64 32
+
+# MinIO Access Key (self-hosted storage only, 27 characters)
+openssl rand -base64 20 | tr -d '/+=' | head -c 27
+
+# MinIO Secret Key (self-hosted storage only, 40+ characters)
+openssl rand -base64 40
 ```
+
+**Example Generated Credentials:**
+```bash
+# These are placeholders - GENERATE YOUR OWN using commands above!
+SECRET_KEY=<your-generated-secret-key>
+POSTGRES_PASSWORD=<your-generated-postgres-password>
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
+AWS_ACCESS_KEY_ID=<your-storage-access-key>  # From DO/AWS console or generated for MinIO
+AWS_SECRET_ACCESS_KEY=<your-storage-secret-key>  # From DO/AWS console or generated for MinIO
+```
+
+**Note**: For Digital Ocean Spaces or AWS S3, generate access keys from your cloud provider console instead of using the MinIO generation commands.
 
 #### 2. **Verify SSL/TLS Configuration**
 
@@ -104,11 +124,17 @@ python3 -c "import secrets; print(secrets.token_urlsafe(50))"
 - [ ] PostgreSQL accessible only within Docker network
 - [ ] No public port exposure in production
 
+**How to Generate:**
+```bash
+openssl rand -base64 32
+```
+
 **Where It's Used:**
 - `.env.infra` - `POSTGRES_PASSWORD`
 - `.env.api` - `POSTGRES_PASSWORD`
 - `.env.worker` - `POSTGRES_PASSWORD`
 - `.env.beat-worker` - `POSTGRES_PASSWORD`
+- `.env.migrator` - `POSTGRES_PASSWORD`
 
 #### 3. **OpenAI API Key**
 

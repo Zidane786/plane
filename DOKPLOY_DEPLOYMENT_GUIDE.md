@@ -105,7 +105,7 @@ All credentials in this deployment must be cryptographically secure. Use these c
 python3 -c 'import secrets; print(secrets.token_urlsafe(50))'
 
 # Example output:
-# LtBkbgDqp-ZUlhkBjoO3kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
+# LtBkbgDqp-ZUlhkBjo63kH6ftJpj6TcXR_w5HhKVsezQ_qK52pxAAUXokyJlwOUUh_U
 ```
 
 **Used in**: `.env.api`, `.env.worker`, `.env.beat-worker`, `.env.live`, `.env.migrator`
@@ -117,7 +117,7 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(50))'
 openssl rand -base64 32
 
 # Example output:
-# ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg=
+# ajMeB9eLtQSBf5S_vz4R1ELZE9n34KL3RzhhoK4EqJg=
 ```
 
 **Used in**: `.env.infra`, `.env.api`, `.env.worker`, `.env.beat-worker`, `.env.migrator`
@@ -129,7 +129,7 @@ openssl rand -base64 32
 openssl rand -base64 32
 
 # Example output:
-# lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU=
+# lnI5L_985_Ikx6w2l73D9_XeS9m361SCetuBp_UwjBU=
 ```
 
 **Used in**: `.env.infra`, `.env.api`, `.env.worker`, `.env.beat-worker`
@@ -151,8 +151,8 @@ openssl rand -base64 20 | tr -d '/+=' | head -c 27
 openssl rand -base64 40
 
 # Example outputs:
-# Access Key: fHr_yxVxIsgYxs479hf_Tzf74cM
-# Secret Key: Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw==
+# Access Key: fHr_yxVxIsgYxs479hc_Tzf74cM
+# Secret Key: Cg28nyvS0HVe6Ph7ovUmx2xBcQi3NrW56oOVQcbw5Y27RsTHI81tTw==
 ```
 
 **Used in**: `.env.api`, `.env.worker` (and `.env.infra` only if using MinIO)
@@ -423,7 +423,7 @@ DEBUG=0
 POSTGRES_USER=plane
 POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
-DATABASE_URL=postgresql://plane:ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg@plane-postgres:5432/plane
+DATABASE_URL=postgresql://plane:<your-generated-postgres-password>@plane-postgres:5432/plane
 
 # Redis
 REDIS_URL=redis://plane-redis:6379/
@@ -431,7 +431,7 @@ REDIS_URL=redis://plane-redis:6379/
 # RabbitMQ (must match .env.infra)
 RABBITMQ_USER=plane
 RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
-CELERY_BROKER_URL=amqp://plane:lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU@plane-rabbitmq:5672/plane
+CELERY_BROKER_URL=amqp://plane:<your-generated-rabbitmq-password>@plane-rabbitmq:5672/plane
 
 # URLs
 WEB_URL=https://plane.mohdop.com
@@ -628,11 +628,18 @@ curl https://plane.mohdop.com/live/health
 #### 7.2 **Configure Nixpacks**
 
 1. In application settings, go to **"Build"** tab
-2. Set **Nixpacks Config Path**: `nixpacks.frontend.toml`
+2. **Important**: Specify the Nixpacks config file location
+   - **Option A (Recommended)**: Add to Environment Variables:
+     ```bash
+     NIXPACKS_CONFIG_FILE=deployment/6-services/nixpacks.frontend.toml
+     ```
+   - **Option B**: Copy `deployment/6-services/nixpacks.frontend.toml` to project root and rename to `nixpacks.toml`
 3. The build will:
    - Build all 3 frontend apps (web, admin, space)
    - Bundle them with Nginx
    - Serve on port 3000
+
+**Note**: We keep nixpacks configs in deployment folders (not root) to maintain complete deployment references in each folder.
 
 #### 7.3 **Set Environment Variables**
 

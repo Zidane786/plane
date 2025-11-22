@@ -70,7 +70,7 @@ Environment variables for infrastructure services deployed in `docker-compose.in
 **Example:**
 ```bash
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
 POSTGRES_MAX_CONNECTIONS=1000
 ```
@@ -104,7 +104,7 @@ REDIS_PORT=6379
 **Example:**
 ```bash
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 RABBITMQ_VHOST=plane
 ```
 
@@ -122,8 +122,8 @@ RABBITMQ_VHOST=plane
 
 **Example:**
 ```bash
-AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxs479hf_Tzf74cM
-AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUmx2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
+AWS_ACCESS_KEY_ID=fHr_yxVxIsgYxz179hf_Tzf74cM
+AWS_SECRET_ACCESS_KEY=Cg28nyvS0HVe6Ph7ovUaw2xBPQi3NrW56oOVQcbw5Y27RsTHI81tTw
 AWS_REGION=us-east-1
 AWS_S3_BUCKET_NAME=uploads
 ```
@@ -186,10 +186,10 @@ DJANGO_SETTINGS_MODULE=plane.settings.production
 **Example:**
 ```bash
 POSTGRES_USER=plane
-POSTGRES_PASSWORD=ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg
+POSTGRES_PASSWORD=<your-generated-postgres-password>
 POSTGRES_DB=plane
 PGHOST=plane-postgres
-DATABASE_URL=postgresql://plane:ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg@plane-postgres:5432/plane
+DATABASE_URL=postgresql://plane:<your-generated-postgres-password>@plane-postgres:5432/plane
 ```
 
 ### Redis Configuration
@@ -214,10 +214,10 @@ DATABASE_URL=postgresql://plane:ajMeB9eLtQSBfZS_vz4R1ELZE9n34KL3RzhhoK4EqJg@plan
 **Example:**
 ```bash
 RABBITMQ_USER=plane
-RABBITMQ_PASSWORD=lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU
+RABBITMQ_PASSWORD=<your-generated-rabbitmq-password>
 RABBITMQ_VHOST=plane
 RABBITMQ_HOST=plane-rabbitmq
-CELERY_BROKER_URL=amqp://plane:lnI5L_985_Ikx6w6l73D9_XeS9m361SCetuBp_UwjBU@plane-rabbitmq:5672/plane
+CELERY_BROKER_URL=amqp://plane:<your-generated-rabbitmq-password>@plane-rabbitmq:5672/plane
 ```
 
 ### Application URLs

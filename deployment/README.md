@@ -8,7 +8,7 @@ This folder contains **two deployment approaches** for Plane on Dokploy. Choose 
 
 | Aspect | 6 Services (Recommended) | Consolidated (3 Services) |
 |--------|-------------------------|---------------------------|
-| **Dokploy Apps** | 6 applications | 3 applications |
+| **Dokploy Apps** | 6 apps + 1 migrator | 3 apps + 1 migrator |
 | **Complexity** | Medium | Low |
 | **Control** | Maximum | Good |
 | **Scaling** | Independent per service | Limited |
@@ -26,14 +26,15 @@ This folder contains **two deployment approaches** for Plane on Dokploy. Choose 
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│              6 Dokploy Applications                   │
+│            6 Dokploy Apps + 1 Migrator                │
 ├──────────────────────────────────────────────────────┤
-│  1. Infrastructure (Postgres, Redis, RabbitMQ, MinIO)│
-│  2. API Backend (Django REST API)                    │
-│  3. Worker (Celery background tasks)                 │
-│  4. Beat Worker (Celery scheduler)                   │
-│  5. Live Server (WebSocket collaboration)            │
-│  6. Frontend (Web + Admin + Space apps)              │
+│  1. Infrastructure (Postgres, Redis, RabbitMQ)       │
+│  2. Migrator (DB migrations - ONE-TIME, then delete) │
+│  3. API Backend (Django REST API)                    │
+│  4. Worker (Celery background tasks)                 │
+│  5. Beat Worker (Celery scheduler)                   │
+│  6. Live Server (WebSocket collaboration)            │
+│  7. Frontend (Web + Admin + Space apps)              │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -82,18 +83,21 @@ This folder contains **two deployment approaches** for Plane on Dokploy. Choose 
 ```
 6-services/
 ├── docker-compose.infra.yml          # Infrastructure services
+├── docker-compose.migrator.yml       # Database migrations (ONE-TIME)
 ├── docker-compose.api.yml            # API backend
 ├── docker-compose.worker.yml         # Celery worker
 ├── docker-compose.beat-worker.yml    # Celery beat
 ├── docker-compose.live.yml           # Live server
-├── nixpacks.frontend.toml            # Frontend build config
-├── .env.infra.example
-├── .env.api.example
-├── .env.worker.example
-├── .env.beat-worker.example
-├── .env.live.example
-├── .env.frontend.example
-└── DEPLOYMENT_GUIDE.md               # Step-by-step instructions
+├── nixpacks.frontend.toml            # Frontend build config (Nixpacks)
+│                                      # Note: Backend uses Docker Compose
+├── .env.infra
+├── .env.migrator                     # Migrator env (minimal)
+├── .env.api
+├── .env.worker
+├── .env.beat-worker
+├── .env.live
+├── .env.frontend
+└── (see root DOKPLOY_DEPLOYMENT_GUIDE.md for full instructions)
 ```
 
 ---
@@ -106,11 +110,12 @@ This folder contains **two deployment approaches** for Plane on Dokploy. Choose 
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│              3 Dokploy Applications                   │
+│            3 Dokploy Apps + 1 Migrator                │
 ├──────────────────────────────────────────────────────┤
-│  1. Infrastructure (Postgres, Redis, RabbitMQ, MinIO)│
-│  2. Backend (API + Worker + Beat Worker + Live)      │
-│  3. Frontend (Web + Admin + Space apps)              │
+│  1. Infrastructure (Postgres, Redis, RabbitMQ)       │
+│  2. Migrator (DB migrations - ONE-TIME, then delete) │
+│  3. Backend (API + Worker + Beat Worker + Live)      │
+│  4. Frontend (Web + Admin + Space apps)              │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -150,12 +155,14 @@ This folder contains **two deployment approaches** for Plane on Dokploy. Choose 
 ```
 consolidated/
 ├── docker-compose.infra.yml          # Infrastructure services
+├── docker-compose.migrator.yml       # Database migrations (ONE-TIME)
 ├── docker-compose.backend.yml        # All backend services combined
 ├── nixpacks.frontend.toml            # Frontend build config
-├── .env.infra.example
-├── .env.backend.example              # Single backend env file
-├── .env.frontend.example
-└── DEPLOYMENT_GUIDE.md               # Step-by-step instructions
+├── .env.infra
+├── .env.migrator                     # Migrator env (minimal)
+├── .env.backend                      # Single backend env file
+├── .env.frontend
+└── (see root DOKPLOY_DEPLOYMENT_GUIDE.md for full instructions)
 ```
 
 ---

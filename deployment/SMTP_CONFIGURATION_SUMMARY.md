@@ -19,7 +19,7 @@ EMAIL_HOST=mail.mohdop.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=1
 EMAIL_HOST_USER=zidane@mohdop.com
-EMAIL_HOST_PASSWORD=123
+EMAIL_HOST_PASSWORD=<your-smtp-password>
 DEFAULT_FROM_EMAIL=zidane@mohdop.com
 ```
 
@@ -147,7 +147,7 @@ Current password: `123`
 
 ```bash
 # Example of strong password
-EMAIL_HOST_PASSWORD=Xy9#mK2$pLq8@Zn4vRt6
+EMAIL_HOST_PASSWORD=<your-strong-smtp-password>
 ```
 
 ### 2. Port 587 Explanation

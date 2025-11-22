@@ -46,11 +46,12 @@ cat DEPLOYMENT_GUIDE.md
 
 # Files you'll deploy:
 # 1. docker-compose.infra.yml       (.env.infra)
-# 2. docker-compose.api.yml          (.env.api)
-# 3. docker-compose.worker.yml       (.env.worker)
-# 4. docker-compose.beat-worker.yml  (.env.beat-worker)
-# 5. docker-compose.live.yml         (.env.live)
-# 6. nixpacks.frontend.toml          (.env.frontend)
+# 2. docker-compose.migrator.yml     (.env.migrator) - ONE-TIME
+# 3. docker-compose.api.yml          (.env.api)
+# 4. docker-compose.worker.yml       (.env.worker)
+# 5. docker-compose.beat-worker.yml  (.env.beat-worker)
+# 6. docker-compose.live.yml         (.env.live)
+# 7. nixpacks.frontend.toml          (.env.frontend)
 ```
 
 **Setup Time**: 15-20 minutes
@@ -72,8 +73,9 @@ cat DEPLOYMENT_GUIDE.md
 
 # Files you'll deploy:
 # 1. docker-compose.infra.yml      (.env.infra)
-# 2. docker-compose.backend.yml    (.env.backend)
-# 3. nixpacks.frontend.toml        (.env.frontend)
+# 2. docker-compose.migrator.yml    (.env.migrator) - ONE-TIME
+# 3. docker-compose.backend.yml    (.env.backend)
+# 4. nixpacks.frontend.toml        (.env.frontend)
 ```
 
 **Setup Time**: 10-15 minutes
