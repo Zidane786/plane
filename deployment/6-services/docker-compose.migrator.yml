@@ -1,0 +1,59 @@
+# ==============================================================================
+# Plane Database Migrator Service - Docker Compose
+# ==============================================================================
+# Run this ONCE after deploying infrastructure and BEFORE deploying API
+# This applies all Django database migrations
+#
+# Prerequisites:
+# 1. Deploy docker-compose.infra.yml first
+# 2. Ensure plane-network exists
+# 3. Run this migrator once
+# 4. Then deploy API, worker, etc.
+# ==============================================================================
+
+services:
+  # ============================================================================
+  # Database Migrator (One-time job)
+  # ============================================================================
+  migrator:
+    container_name: plane-migrator
+    build:
+      context: ../../apps/api
+      dockerfile: Dockerfile.api
+      args:
+        DOCKER_BUILDKIT: 1
+    restart: "no"  # Run once and exit
+    command: ./bin/docker-entrypoint-migrator.sh
+    environment:
+      # Django Configuration
+      SECRET_KEY: ${SECRET_KEY}
+      DEBUG: ${DEBUG:-0}
+      DJANGO_SETTINGS_MODULE: plane.settings.production
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@plane-postgres:5432/${POSTGRES_DB}
+      PGHOST: plane-postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+
+      # Redis
+      REDIS_URL: redis://plane-redis:6379/
+      REDIS_HOST: plane-redis
+      REDIS_PORT: 6379
+
+      # Python
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+
+    networks:
+      - plane-network
+
+# ==============================================================================
+# Network
+# ==============================================================================
+networks:
+  plane-network:
+    external: true
+    name: plane-network
